@@ -76,6 +76,39 @@ export const DEVICES: DeviceConfig[] = [
 
 export const DEVICE_IDS = DEVICES.map((d) => d.id);
 
+// ---------------------------------------------------------------- weather
+
+export type WeatherView = 'wind' | 'rainfall' | 'humidity' | 'temperature';
+export type WeatherMetricId = 'wind_speed' | 'wind_dir' | 'rainfall' | 'humidity' | 'temperature';
+
+export const WEATHER_VIEWS: { id: WeatherView; label: string; metric: WeatherMetricId; unit: string; title: string }[] = [
+  { id: 'wind', label: 'Wind', metric: 'wind_speed', unit: 'km/h', title: 'Wind speed and direction' },
+  { id: 'rainfall', label: 'Rain', metric: 'rainfall', unit: 'mm', title: 'Rainfall per hour' },
+  { id: 'humidity', label: 'Humidity', metric: 'humidity', unit: '%', title: 'Relative humidity' },
+  { id: 'temperature', label: 'Temperature', metric: 'temperature', unit: '°C', title: 'Air temperature' },
+];
+
+export const WEATHER_STATIONS = [
+  { id: 'nea-ws-S50', name: 'Clementi Road', region: 'West / Central' },
+  { id: 'nea-ws-S121', name: 'Old Choa Chu Kang Rd', region: 'West' },
+  { id: 'nea-ws-S111', name: 'Scotts Road', region: 'Central' },
+  { id: 'nea-ws-S06', name: 'Paya Lebar', region: 'East' },
+  { id: 'nea-ws-S104', name: 'Woodlands', region: 'North' },
+  { id: 'nea-ws-S116', name: 'Pasir Panjang', region: 'South' },
+];
+
+/** Weather series colour: deliberately not one of the region colours. */
+export const WEATHER_COLOR = { light: '#4a3aa7', dark: '#9085e9' };
+
+export const ALL_METRIC_IDS: string[] = [...Object.keys(METRICS), 'wind_speed', 'wind_dir', 'rainfall', 'humidity', 'temperature'];
+export const ALL_DEVICE_IDS: string[] = [...DEVICE_IDS, ...WEATHER_STATIONS.map((s) => s.id)];
+
+/** "SW" for 225°, the direction the wind comes from. */
+export function compass(deg: number) {
+  const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return names[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
 export const RANGE_PRESETS = [
   { id: '24h', label: '24 h', hours: 24 },
   { id: '3d', label: '3 days', hours: 72 },

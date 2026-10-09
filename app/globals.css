@@ -435,3 +435,35 @@ th {
 .footer p {
   margin: 4px 0;
 }
+
+.chart-small {
+  height: clamp(220px, 30vh, 300px);
+}
+
+.empty.small {
+  height: 220px;
+}
+
+.weather-controls {
+  margin-top: 10px;
+}
+
+.select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.select select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 0;
+  box-shadow: 0 0 0 1px var(--ring);
+  border-radius: 8px;
+  padding: 5px 8px;
+  max-width: 100%;
+}

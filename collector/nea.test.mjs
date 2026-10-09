@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dateRange, dedupe, parseReadings, sgDate } from './nea.mjs';
+import { dateRange, dedupe, hasMidnight, parseReadings, sgDate } from './nea.mjs';
 
 const v1 = {
   items: [
@@ -54,4 +54,10 @@ test('dedupe treats equal instants in different zones as the same row', () => {
 test('date helpers use Singapore dates', () => {
   assert.equal(sgDate(new Date('2026-10-08T17:30:00Z')), '2026-10-09');
   assert.deepEqual(dateRange('2026-09-30', '2026-10-02'), ['2026-09-30', '2026-10-01', '2026-10-02']);
+});
+
+test('detects whether the 00:00 reading of a day is present', () => {
+  const rows = [{ ts: '2026-10-08T01:00:00+08:00' }];
+  assert.equal(hasMidnight(rows, '2026-10-08'), false);
+  assert.equal(hasMidnight([...rows, { ts: '2026-10-07T16:00:00Z' }], '2026-10-08'), true);
 });

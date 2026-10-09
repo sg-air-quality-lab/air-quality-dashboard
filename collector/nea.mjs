@@ -54,7 +54,7 @@ export function dedupe(rows) {
   return [...map.values()];
 }
 
-async function getJson(url, { retries = 3 } = {}) {
+export async function getJson(url, { retries = 3 } = {}) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, { headers: { accept: 'application/json' } });
     if (res.ok) return res.json();
@@ -66,13 +66,25 @@ async function getJson(url, { retries = 3 } = {}) {
   }
 }
 
-/** Fetch one day of one metric. Tries the v1 API first, then v2 (with pagination). */
+/** True if one of the rows is the 00:00 reading of `date` (Singapore time). */
+export function hasMidnight(rows, date) {
+  const midnight = Date.parse(`${date}T00:00:00+08:00`);
+  return rows.some((r) => Date.parse(r.ts) === midnight);
+}
+
+/**
+ * Fetch one day of one metric. Tries the v1 API first, then v2 (with pagination).
+ * The v1 day query leaves out the 00:00 reading, so it is fetched separately.
+ */
 export async function fetchDay(metricId, date) {
   const { endpoint } = NEA_METRICS[metricId];
   try {
     const json = await getJson(`${V1}/${endpoint}?date=${date}`);
     const rows = parseReadings(json, metricId);
-    if (rows.length) return rows;
+    if (rows.length) {
+      if (!hasMidnight(rows, date)) rows.push(...(await fetchMidnight(metricId, date)));
+      return rows;
+    }
   } catch (err) {
     console.warn(`v1 failed for ${metricId} ${date}: ${err.message}`);
   }
@@ -85,5 +97,19 @@ export async function fetchDay(metricId, date) {
     token = json?.data?.paginationToken;
     if (!token) break;
   }
+  if (rows.length && !hasMidnight(rows, date)) rows.push(...(await fetchMidnight(metricId, date)));
   return rows;
+}
+
+/** The 00:00 reading of a day, asked for by exact time. Empty if NEA has none. */
+async function fetchMidnight(metricId, date) {
+  const { endpoint } = NEA_METRICS[metricId];
+  try {
+    const json = await getJson(`${V1}/${endpoint}?date_time=${date}T00:00:00`);
+    const midnight = Date.parse(`${date}T00:00:00+08:00`);
+    return parseReadings(json, metricId).filter((r) => Date.parse(r.ts) === midnight);
+  } catch (err) {
+    console.warn(`midnight value missing for ${metricId} ${date}: ${err.message}`);
+    return [];
+  }
 }
