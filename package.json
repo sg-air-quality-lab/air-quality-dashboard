@@ -1,0 +1,29 @@
+{
+  "name": "air-quality-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open dashboard for Singapore air quality: official NEA data plus citizen sensors.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --test collector/*.test.mjs",
+    "collect": "node collector/collect-nea.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "echarts": "^5.6.0",
+    "next": "^15.5.27",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3"
+  }
+}
