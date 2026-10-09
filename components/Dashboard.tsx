@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AirChart, { type ChartSeries } from './AirChart';
-import { DEVICES, METRICS, RANGE_PRESETS, type MetricId, type RangePresetId } from '@/lib/config';
+import WeatherChart from './WeatherChart';
+import {
+  DEVICES,
+  METRICS,
+  RANGE_PRESETS,
+  WEATHER_COLOR,
+  WEATHER_STATIONS,
+  WEATHER_VIEWS,
+  type MetricId,
+  type RangePresetId,
+  type WeatherView,
+} from '@/lib/config';
 import { fmtDateTime, fmtIsoLocal, fmtValue, sgDay } from '@/lib/format';
 
 interface Point {
@@ -26,13 +37,33 @@ interface State {
   metric: MetricId;
   devices: string[];
   range: Range;
+  weather: WeatherView;
+  station: string;
 }
 
 const DEFAULT_STATE: State = {
   metric: 'pm25_1h',
   devices: DEVICES.map((d) => d.id),
   range: { preset: '3d' },
+  weather: 'wind',
+  station: 'nea-ws-S50',
 };
+
+const CHART_GROUP = 'air-quality';
+
+/** Sorted [time, value] pairs with a null inserted where readings are missing, so lines break instead of bridging. */
+function withGaps(points: Point[], device: string, step: number): [number, number | null][] {
+  const pts = points
+    .filter((p) => p.device === device)
+    .map((p) => [Date.parse(p.t), p.v] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  const out: [number, number | null][] = [];
+  pts.forEach((p, i) => {
+    if (i > 0 && p[0] - pts[i - 1][0] > step * 1.5) out.push([pts[i - 1][0] + step, null]);
+    out.push(p);
+  });
+  return out;
+}
 
 function readUrl(): State {
   if (typeof window === 'undefined') return DEFAULT_STATE;
@@ -48,7 +79,9 @@ function readUrl(): State {
   let range: Range = DEFAULT_STATE.range;
   if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) range = { preset: 'custom', from, to };
   else if (RANGE_PRESETS.some((p) => p.id === preset)) range = { preset: preset as RangePresetId };
-  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range };
+  const weather = WEATHER_VIEWS.some((w) => w.id === q.get('weather')) ? (q.get('weather') as WeatherView) : DEFAULT_STATE.weather;
+  const station = WEATHER_STATIONS.some((w) => w.id === `nea-ws-${q.get('station')}`) ? `nea-ws-${q.get('station')}` : DEFAULT_STATE.station;
+  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, weather, station };
 }
 
 function writeUrl(s: State) {
@@ -59,6 +92,8 @@ function writeUrl(s: State) {
     q.set('from', s.range.from);
     q.set('to', s.range.to);
   } else q.set('range', s.range.preset);
+  q.set('weather', s.weather);
+  q.set('station', s.station.replace('nea-ws-', ''));
   window.history.replaceState(null, '', `?${q.toString()}`);
 }
 
@@ -94,6 +129,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [weatherData, setWeatherData] = useState<{ values: Point[]; dirs: Point[]; bucket: string } | null>(null);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
   const dark = useDarkMode();
 
   useEffect(() => {
@@ -102,8 +139,11 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (ready) writeUrl(state);
+  }, [state, ready]);
+
+  useEffect(() => {
     if (!ready) return;
-    writeUrl(state);
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
@@ -120,28 +160,58 @@ export default function Dashboard() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [state, ready]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.metric, state.devices, state.range, ready]);
+
+  // Weather for exactly the same time window as the main chart.
+  useEffect(() => {
+    if (!data || data.demo) return;
+    const view = WEATHER_VIEWS.find((w) => w.id === state.weather)!;
+    const ctrl = new AbortController();
+    const q = (metric: string) =>
+      fetch(`/api/series?metric=${metric}&devices=${state.station}&from=${data.from}&to=${data.to}&fixed=1`, { signal: ctrl.signal }).then(
+        async (r) => {
+          const json = (await r.json()) as ApiResult;
+          if (!r.ok) throw new Error(json.error ?? 'Could not load weather data');
+          return json;
+        },
+      );
+    setWeatherError(null);
+    Promise.all([q(view.metric), view.id === 'wind' ? q('wind_dir') : Promise.resolve(null)])
+      .then(([vals, dirs]) => setWeatherData({ values: vals.points, dirs: dirs?.points ?? [], bucket: vals.bucket }))
+      .catch((e: Error) => {
+        if (e.name !== 'AbortError') setWeatherError(e.message);
+      });
+    return () => ctrl.abort();
+  }, [data, state.weather, state.station]);
 
   const metric = METRICS[state.metric];
   const daily = data?.bucket === '1 day';
 
+  const step = daily ? 86400_000 : 3600_000;
+  const xMin = data ? Date.parse(data.from) : undefined;
+  const xMax = data ? Date.parse(data.to) : undefined;
+
   const chartSeries: ChartSeries[] = useMemo(() => {
     if (!data) return [];
-    const step = daily ? 86400_000 : 3600_000;
-    return DEVICES.filter((d) => state.devices.includes(d.id)).map((d) => {
-      const pts = data.points
-        .filter((p) => p.device === d.id)
-        .map((p) => [Date.parse(p.t), p.v] as [number, number])
-        .sort((a, b) => a[0] - b[0]);
-      // Insert a gap marker where readings are missing, so the line breaks instead of bridging.
-      const out: [number, number | null][] = [];
-      pts.forEach((p, i) => {
-        if (i > 0 && p[0] - pts[i - 1][0] > step * 1.5) out.push([pts[i - 1][0] + step, null]);
-        out.push(p);
-      });
-      return { id: d.id, name: d.name, color: dark ? d.color.dark : d.color.light, data: out };
-    });
-  }, [data, state.devices, dark, daily]);
+    return DEVICES.filter((d) => state.devices.includes(d.id)).map((d) => ({
+      id: d.id,
+      name: d.name,
+      color: dark ? d.color.dark : d.color.light,
+      data: withGaps(data.points, d.id, step),
+    }));
+  }, [data, state.devices, dark, step]);
+
+  const weatherView = WEATHER_VIEWS.find((w) => w.id === state.weather)!;
+  const weatherStation = WEATHER_STATIONS.find((w) => w.id === state.station)!;
+  const weatherValues = useMemo(
+    () => (weatherData ? withGaps(weatherData.values, state.station, step) : []),
+    [weatherData, state.station, step],
+  );
+  const weatherDirs = useMemo(
+    () => (weatherData?.dirs ?? []).map((p) => [Date.parse(p.t), p.v] as [number, number]),
+    [weatherData],
+  );
 
   const stats = useMemo(() => {
     const pts = data?.points ?? [];
@@ -333,11 +403,80 @@ export default function Dashboard() {
         ) : data && !data.points.length && !loading ? (
           <div className="empty">No readings for this period yet.</div>
         ) : (
-          <AirChart series={chartSeries} metric={metric} daily={daily} dark={dark} resetKey={resetKey} />
+          <AirChart
+            series={chartSeries}
+            metric={metric}
+            daily={daily}
+            dark={dark}
+            resetKey={resetKey}
+            xMin={xMin}
+            xMax={xMax}
+            group={CHART_GROUP}
+          />
         )}
         {loading && <div className="loading" aria-hidden />}
         {daily && <p className="hint">Long period: values are daily averages.</p>}
       </section>
+
+      {data && !data.demo && (
+        <section className="card chart-card" aria-label="Weather">
+          <div className="chart-head">
+            <div>
+              <h2>{weatherView.title}</h2>
+              <p className="hint">
+                NEA weather station {weatherStation.name} ({weatherStation.region}) · same time window as the chart above
+              </p>
+            </div>
+          </div>
+          <div className="controls weather-controls">
+            <div className="segmented" role="radiogroup" aria-label="Weather measure">
+              {WEATHER_VIEWS.map((w) => (
+                <button
+                  key={w.id}
+                  role="radio"
+                  aria-checked={state.weather === w.id}
+                  className={state.weather === w.id ? 'on' : ''}
+                  onClick={() => setState((s) => ({ ...s, weather: w.id }))}
+                >
+                  {w.label}
+                </button>
+              ))}
+            </div>
+            <label className="select">
+              Station
+              <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
+                {WEATHER_STATIONS.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.region})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {weatherError ? (
+            <div className="empty small">{weatherError}</div>
+          ) : weatherData && !weatherValues.length ? (
+            <div className="empty small">No weather readings for this period yet.</div>
+          ) : (
+            <WeatherChart
+              view={state.weather}
+              unit={weatherView.unit}
+              values={weatherValues}
+              directions={weatherDirs}
+              color={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
+              daily={daily}
+              dark={dark}
+              resetKey={resetKey}
+              xMin={xMin}
+              xMax={xMax}
+              group={CHART_GROUP}
+            />
+          )}
+          {state.weather === 'wind' && !daily && (
+            <p className="hint">Arrows show where the wind blows to (up = north). Smoke from Sumatra arrives with wind from the south-west.</p>
+          )}
+        </section>
+      )}
 
       <section className="actions">
         <button onClick={downloadCsv} disabled={!table.length}>

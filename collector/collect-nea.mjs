@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Collects official NEA readings and stores them in Supabase.
+// Collects official NEA readings (PM2.5, PSI and weather) and stores them in Supabase.
 //
 //   node collector/collect-nea.mjs                         -> yesterday and today (hourly job)
 //   node collector/collect-nea.mjs 2026-09-01 2026-10-09   -> backfill a date range
@@ -7,6 +7,7 @@
 // Needs SUPABASE_URL and SUPABASE_SECRET_KEY (server-side key, never in the browser).
 
 import { NEA_METRICS, dateRange, dedupe, fetchDay, sgDate } from './nea.mjs';
+import { fetchWeatherDay } from './weather.mjs';
 
 const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -48,7 +49,7 @@ async function upsert(rows) {
 let stored = 0;
 let failures = 0;
 const dates = dateRange(from, to);
-console.log(`Collecting ${Object.keys(NEA_METRICS).join(', ')} for ${from} .. ${to} (${dates.length} days)`);
+console.log(`Collecting ${Object.keys(NEA_METRICS).join(', ')} and weather for ${from} .. ${to} (${dates.length} days)`);
 
 for (const date of dates) {
   for (const metricId of Object.keys(NEA_METRICS)) {
@@ -62,6 +63,15 @@ for (const date of dates) {
       console.error(`  ${date} ${metricId}: FAILED - ${err.message}`);
     }
     await new Promise((r) => setTimeout(r, 300)); // be gentle with the public API
+  }
+  try {
+    const rows = dedupe(await fetchWeatherDay(date));
+    if (rows.length) await upsert(rows);
+    stored += rows.length;
+    console.log(`  ${date} weather: ${rows.length} values`);
+  } catch (err) {
+    failures++;
+    console.error(`  ${date} weather: FAILED - ${err.message}`);
   }
 }
 

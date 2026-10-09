@@ -18,6 +18,10 @@ interface Props {
   daily: boolean;
   dark: boolean;
   resetKey: number;
+  /** Fixed time window, so charts in the same group zoom in step. */
+  xMin?: number;
+  xMax?: number;
+  group?: string;
 }
 
 const INK = {
@@ -25,7 +29,7 @@ const INK = {
   dark: { muted: '#898781', secondary: '#c3c2b7', primary: '#ffffff', grid: '#2c2c2a', axis: '#383835', surface: '#1a1a19' },
 };
 
-export default function AirChart({ series, metric, daily, dark, resetKey }: Props) {
+export default function AirChart({ series, metric, daily, dark, resetKey, xMin, xMax, group }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<ECharts | null>(null);
   // Always points at the latest render function, so the async chart init never uses stale props.
@@ -39,6 +43,10 @@ export default function AirChart({ series, metric, daily, dark, resetKey }: Prop
     import('echarts').then((echarts) => {
       if (disposed || !el.current) return;
       chart.current = echarts.init(el.current, undefined, { renderer: 'canvas' });
+      if (group) {
+        chart.current.group = group;
+        echarts.connect(group);
+      }
       observer = new ResizeObserver(() => chart.current?.resize());
       observer.observe(el.current);
       renderRef.current();
@@ -55,7 +63,7 @@ export default function AirChart({ series, metric, daily, dark, resetKey }: Prop
   useEffect(() => {
     render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, metric, daily, dark]);
+  }, [series, metric, daily, dark, xMin, xMax]);
 
   useEffect(() => {
     chart.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
@@ -139,6 +147,8 @@ export default function AirChart({ series, metric, daily, dark, resetKey }: Prop
       },
       xAxis: {
         type: 'time',
+        min: xMin,
+        max: xMax,
         axisLine: { lineStyle: { color: ink.axis } },
         axisTick: { show: false },
         axisLabel: { color: ink.muted, fontSize: 11, hideOverlap: true },

@@ -2,7 +2,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { RAW_LIMIT_DAYS, type MetricId } from './config';
+import { RAW_LIMIT_DAYS } from './config';
 
 export interface Point {
   t: string;
@@ -21,7 +21,7 @@ export function isDemoMode() {
 }
 
 export async function getSeries(
-  metric: MetricId,
+  metric: string,
   devices: string[],
   from: Date,
   to: Date,
@@ -53,7 +53,7 @@ export async function getSeries(
   return { points, bucket, demo: false };
 }
 
-async function demoPoints(metric: MetricId, devices: string[], from: Date, to: Date): Promise<Point[]> {
+async function demoPoints(metric: string, devices: string[], from: Date, to: Date): Promise<Point[]> {
   const file = await readFile(path.join(process.cwd(), 'data', 'demo.json'), 'utf8');
   const all = JSON.parse(file).points as (Point & { metric: string })[];
   return all
