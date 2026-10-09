@@ -10,6 +10,8 @@ export interface ChartSeries {
   name: string;
   color: string;
   data: [number, number | null][];
+  /** Dashed line, used for uncalibrated citizen sensors. */
+  dashed?: boolean;
 }
 
 interface Props {
@@ -186,7 +188,7 @@ export default function AirChart({ series, metric, daily, dark, resetKey, xMin, 
         showSymbol: false,
         symbolSize: 8,
         connectNulls: false,
-        lineStyle: { width: 2, color: s.color },
+        lineStyle: { width: 2, color: s.color, type: s.dashed ? 'dashed' : 'solid' },
         itemStyle: { color: s.color },
         emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
         markArea: i === 0 ? { silent: true, data: bandAreas as never } : undefined,

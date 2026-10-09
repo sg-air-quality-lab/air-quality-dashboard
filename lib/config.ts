@@ -103,6 +103,12 @@ export const WEATHER_COLOR = { light: '#4a3aa7', dark: '#9085e9' };
 export const ALL_METRIC_IDS: string[] = [...Object.keys(METRICS), 'wind_speed', 'wind_dir', 'rainfall', 'humidity', 'temperature'];
 export const ALL_DEVICE_IDS: string[] = [...DEVICE_IDS, ...WEATHER_STATIONS.map((s) => s.id)];
 
+/** Citizen sensors are not listed publicly; they are opened with an unlisted link (?sensor=citizen-…). */
+export const CITIZEN_ID = /^citizen-[a-z0-9]{8,}$/;
+export const isKnownDevice = (id: string) => ALL_DEVICE_IDS.includes(id) || CITIZEN_ID.test(id);
+
+export const MY_SENSOR_COLOR = { light: '#008300', dark: '#3fae3f' };
+
 /** "SW" for 225°, the direction the wind comes from. */
 export function compass(deg: number) {
   const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
