@@ -8,7 +8,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test collector/*.test.mjs",
+    "test": "node --test collector/*.test.mjs && node --experimental-strip-types --test lib/*.test.ts",
     "collect": "node collector/collect-nea.mjs"
   },
   "engines": {

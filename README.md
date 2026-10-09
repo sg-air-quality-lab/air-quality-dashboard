@@ -50,10 +50,22 @@ npm test           # collector tests
 SUPABASE_URL=... SUPABASE_SECRET_KEY=... npm run collect -- 2026-10-01 2026-10-09
 ```
 
-## Adding a sensor
+## Connecting an airRohr sensor
+
+Citizen sensors deliver their own readings to `POST /api/sensor/airrohr` (airRohr firmware: Configuration → APIs → "Send data to custom API", HTTPS, port 443, with a login and password).
+
+1. In the Supabase SQL editor, create the device with an unlisted id and a coarse location, e.g.
+   `insert into devices (id, name, kind, source, lat, lon, is_public) values ('citizen-xxxxxxxx', 'My balcony', 'citizen', 'airrohr', 1.36, 103.77, true);`
+2. Set its password (at least 16 characters): `select set_device_token('citizen-xxxxxxxx', 'airrohr-<chip id>', '<password>');`
+3. Enter the same login and password in the sensor.
+4. Open the dashboard with `?sensor=citizen-xxxxxxxx` to see the sensor next to NEA, plus a calibration chart.
+
+Only a hash of the password is stored. Raw readings are kept for 30 days, hourly averages permanently.
+
+## Adding other data sources
 
 1. Add a row to `devices` (and to `metrics` if it measures something new).
-2. Add it to `DEVICES` in `lib/config.ts` with a fixed colour.
+2. Add it to `lib/config.ts` with a fixed colour.
 3. Write a small adapter that turns its data into `observations` rows.
 
 ## Data and licence

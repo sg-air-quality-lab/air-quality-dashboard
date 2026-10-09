@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AirChart, { type ChartSeries } from './AirChart';
 import WeatherChart from './WeatherChart';
+import CalibrationChart, { type CalibrationPoint } from './CalibrationChart';
 import {
   DEVICES,
   METRICS,
@@ -10,6 +11,8 @@ import {
   WEATHER_COLOR,
   WEATHER_STATIONS,
   WEATHER_VIEWS,
+  CITIZEN_ID,
+  MY_SENSOR_COLOR,
   type MetricId,
   type RangePresetId,
   type WeatherView,
@@ -39,6 +42,8 @@ interface State {
   range: Range;
   weather: WeatherView;
   station: string;
+  /** Unlisted citizen sensor, only present when opened with ?sensor=… */
+  sensor: string | null;
 }
 
 const DEFAULT_STATE: State = {
@@ -47,6 +52,7 @@ const DEFAULT_STATE: State = {
   range: { preset: '3d' },
   weather: 'wind',
   station: 'nea-ws-S50',
+  sensor: null,
 };
 
 const CHART_GROUP = 'air-quality';
@@ -81,7 +87,8 @@ function readUrl(): State {
   else if (RANGE_PRESETS.some((p) => p.id === preset)) range = { preset: preset as RangePresetId };
   const weather = WEATHER_VIEWS.some((w) => w.id === q.get('weather')) ? (q.get('weather') as WeatherView) : DEFAULT_STATE.weather;
   const station = WEATHER_STATIONS.some((w) => w.id === `nea-ws-${q.get('station')}`) ? `nea-ws-${q.get('station')}` : DEFAULT_STATE.station;
-  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, weather, station };
+  const sensor = CITIZEN_ID.test(q.get('sensor') ?? '') ? q.get('sensor') : null;
+  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, weather, station, sensor };
 }
 
 function writeUrl(s: State) {
@@ -94,6 +101,7 @@ function writeUrl(s: State) {
   } else q.set('range', s.range.preset);
   q.set('weather', s.weather);
   q.set('station', s.station.replace('nea-ws-', ''));
+  if (s.sensor) q.set('sensor', s.sensor);
   window.history.replaceState(null, '', `?${q.toString()}`);
 }
 
@@ -131,6 +139,7 @@ export default function Dashboard() {
   const [copied, setCopied] = useState(false);
   const [weatherData, setWeatherData] = useState<{ values: Point[]; dirs: Point[]; bucket: string } | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationPoint[] | null>(null);
   const dark = useDarkMode();
 
   useEffect(() => {
@@ -147,7 +156,8 @@ export default function Dashboard() {
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/series?metric=${state.metric}&devices=${state.devices.join(',')}&${rangeToQuery(state.range)}`, {
+    const devices = state.sensor && state.metric === 'pm25_1h' ? [...state.devices, state.sensor] : state.devices;
+    fetch(`/api/series?metric=${state.metric}&devices=${devices.join(',')}&${rangeToQuery(state.range)}`, {
       signal: ctrl.signal,
     })
       .then(async (r) => {
@@ -161,7 +171,7 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.metric, state.devices, state.range, ready]);
+  }, [state.metric, state.devices, state.range, state.sensor, ready]);
 
   // Weather for exactly the same time window as the main chart.
   useEffect(() => {
@@ -185,6 +195,58 @@ export default function Dashboard() {
     return () => ctrl.abort();
   }, [data, state.weather, state.station]);
 
+  // Calibration: always the last 14 days, own sensor vs the mean of NEA West and Central.
+  useEffect(() => {
+    if (!state.sensor) return;
+    const ctrl = new AbortController();
+    const to = new Date();
+    const from = new Date(to.getTime() - 14 * 86400_000);
+    const q = (metric: string, devices: string) =>
+      fetch(`/api/series?metric=${metric}&devices=${devices}&from=${from.toISOString()}&to=${to.toISOString()}&fixed=1`, {
+        signal: ctrl.signal,
+      }).then((r) => r.json() as Promise<ApiResult>);
+    Promise.all([q('pm25_1h', `nea-west,nea-central,${state.sensor}`), q('humidity', state.sensor)])
+      .then(([pm, hum]) => {
+        const byT = new Map<number, { nea: number[]; mine?: number; hum?: number }>();
+        const slot = (t: string) => {
+          const k = Date.parse(t);
+          if (!byT.has(k)) byT.set(k, { nea: [] });
+          return byT.get(k)!;
+        };
+        for (const p of pm.points ?? []) {
+          if (p.device === state.sensor) slot(p.t).mine = p.v;
+          else slot(p.t).nea.push(p.v);
+        }
+        for (const p of hum.points ?? []) slot(p.t).hum = p.v;
+        const pts: CalibrationPoint[] = [];
+        for (const [t, s] of byT) {
+          if (s.mine == null || s.hum == null || !s.nea.length) continue;
+          const ref = s.nea.reduce((a, b) => a + b, 0) / s.nea.length;
+          if (ref < 10) continue; // tiny reference values make the ratio meaningless
+          pts.push({ t, humidity: s.hum, ratio: Math.round((s.mine / ref) * 100) / 100 });
+        }
+        setCalibration(pts.sort((a, b) => a.t - b.t));
+      })
+      .catch(() => setCalibration([]));
+    return () => ctrl.abort();
+  }, [state.sensor]);
+
+  const calibrationSummary = useMemo(() => {
+    if (!calibration?.length) return null;
+    const median = (xs: number[]) => {
+      if (!xs.length) return null;
+      const s = [...xs].sort((a, b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    return {
+      all: median(calibration.map((p) => p.ratio)),
+      dry: median(calibration.filter((p) => p.humidity < 75).map((p) => p.ratio)),
+      humid: median(calibration.filter((p) => p.humidity >= 85).map((p) => p.ratio)),
+      hours: calibration.length,
+    };
+  }, [calibration]);
+
   const metric = METRICS[state.metric];
   const daily = data?.bucket === '1 day';
 
@@ -194,13 +256,26 @@ export default function Dashboard() {
 
   const chartSeries: ChartSeries[] = useMemo(() => {
     if (!data) return [];
-    return DEVICES.filter((d) => state.devices.includes(d.id)).map((d) => ({
+    const series: ChartSeries[] = DEVICES.filter((d) => state.devices.includes(d.id)).map((d) => ({
       id: d.id,
       name: d.name,
       color: dark ? d.color.dark : d.color.light,
       data: withGaps(data.points, d.id, step),
     }));
-  }, [data, state.devices, dark, step]);
+    if (state.sensor && data.points.some((p) => p.device === state.sensor)) {
+      series.push({
+        id: state.sensor,
+        name: 'My sensor (uncalibrated)',
+        color: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light,
+        data: withGaps(data.points, state.sensor, step),
+        dashed: true,
+      });
+    }
+    return series;
+  }, [data, state.devices, state.sensor, dark, step]);
+
+  // Only the official NEA values count for the summary, table and CSV.
+  const neaPoints = useMemo(() => (data?.points ?? []).filter((p) => p.device.startsWith('nea-')), [data]);
 
   const weatherView = WEATHER_VIEWS.find((w) => w.id === state.weather)!;
   const weatherStation = WEATHER_STATIONS.find((w) => w.id === state.station)!;
@@ -214,7 +289,7 @@ export default function Dashboard() {
   );
 
   const stats = useMemo(() => {
-    const pts = data?.points ?? [];
+    const pts = neaPoints;
     if (!pts.length) return null;
     const name = (id: string) => DEVICES.find((d) => d.id === id)?.name ?? id;
     let peak = pts[0];
@@ -234,17 +309,16 @@ export default function Dashboard() {
       mean: sum / pts.length,
       above: above.size,
     };
-  }, [data, metric, daily]);
+  }, [neaPoints, metric, daily]);
 
   const table = useMemo(() => {
-    if (!data) return [];
     const byT = new Map<string, Record<string, number>>();
-    for (const p of data.points) {
+    for (const p of neaPoints) {
       const key = new Date(p.t).toISOString();
       byT.set(key, { ...(byT.get(key) ?? {}), [p.device]: p.v });
     }
     return [...byT.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [data]);
+  }, [neaPoints]);
 
   const selectedDevices = DEVICES.filter((d) => state.devices.includes(d.id));
 
@@ -373,6 +447,12 @@ export default function Dashboard() {
               </button>
             );
           })}
+          {state.sensor && state.metric === 'pm25_1h' && (
+            <span className="chip on" title="Your own sensor, uncalibrated. Only visible with this link.">
+              <span className="swatch dashed" style={{ borderColor: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light }} aria-hidden />
+              My sensor
+            </span>
+          )}
         </div>
       </section>
 
@@ -474,6 +554,48 @@ export default function Dashboard() {
           )}
           {state.weather === 'wind' && !daily && (
             <p className="hint">Arrows show where the wind blows to (up = north). Smoke from Sumatra arrives with wind from the south-west.</p>
+          )}
+        </section>
+      )}
+
+      {state.sensor && (
+        <section className="card chart-card" aria-label="My sensor calibration">
+          <div className="chart-head">
+            <div>
+              <h2>My sensor compared with NEA</h2>
+              <p className="hint">
+                Last 14 days, hour by hour: your sensor divided by the average of NEA West and Central. This view is not linked from the
+                public page.
+              </p>
+            </div>
+          </div>
+          {calibration == null ? (
+            <div className="empty small">Loading…</div>
+          ) : calibration.length < 6 ? (
+            <div className="empty small">Not enough data yet. After about a day of readings from your sensor, the comparison appears here.</div>
+          ) : (
+            <>
+              <div className="tiles tiles-3">
+                <Tile label="Overall" value={calibrationSummary?.all ?? undefined} unit="× NEA" sub={`${calibrationSummary?.hours} hours compared`} />
+                <Tile
+                  label="When humidity is below 75%"
+                  value={calibrationSummary?.dry ?? undefined}
+                  unit="× NEA"
+                  sub={calibrationSummary?.dry == null ? 'No dry hours yet' : 'Drier air'}
+                />
+                <Tile
+                  label="When humidity is 85% or more"
+                  value={calibrationSummary?.humid ?? undefined}
+                  unit="× NEA"
+                  sub={calibrationSummary?.humid == null ? 'No humid hours yet' : 'Humid air'}
+                />
+              </div>
+              <CalibrationChart points={calibration} color={dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light} dark={dark} />
+              <p className="hint">
+                1× means your sensor agrees with NEA. If the dots rise to the right, humidity makes your sensor read too high: water makes
+                the particles swell.
+              </p>
+            </>
           )}
         </section>
       )}

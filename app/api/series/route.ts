@@ -2,7 +2,7 @@
 // The one "counter" in front of the database: validates the question, then asks Supabase.
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { ALL_DEVICE_IDS, ALL_METRIC_IDS } from '@/lib/config';
+import { ALL_METRIC_IDS, isKnownDevice } from '@/lib/config';
 import { demoEnd, getSeries, isDemoMode } from '@/lib/series';
 
 const MAX_SPAN_DAYS = 366 * 5;
@@ -11,9 +11,9 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
 
   const metric = q.get('metric');
-  if (!metric || !ALL_METRIC_IDS.includes(metric)) return bad('Unknown metric');
+  if (!metric || !(ALL_METRIC_IDS.includes(metric) || ['pm10', 'pm25_raw'].includes(metric))) return bad('Unknown metric');
 
-  const devices = (q.get('devices') ?? '').split(',').filter((d) => ALL_DEVICE_IDS.includes(d));
+  const devices = (q.get('devices') ?? '').split(',').filter(isKnownDevice);
   if (devices.length === 0) return bad('Choose at least one region');
 
   let to = q.get('to') ? new Date(q.get('to')!) : new Date();
