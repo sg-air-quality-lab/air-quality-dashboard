@@ -9,6 +9,8 @@ export interface Band {
   label: string;
   /** Background tint for the chart. Status colours, never series colours. */
   tint: string | null;
+  /** Solid status colour for badges and the "right now" card. */
+  accent: string;
 }
 
 export interface MetricConfig {
@@ -30,12 +32,12 @@ export const METRICS: Record<MetricId, MetricConfig> = {
     short: 'PM2.5 (1-hr)',
     unit: 'µg/m³',
     alertFrom: 55,
-    alertLabel: 'Hours above 55',
+    alertLabel: 'Hours Elevated or worse',
     bands: [
-      { from: 0, to: 55, label: 'Normal', tint: null },
-      { from: 55, to: 150, label: 'Elevated', tint: 'rgba(250, 178, 25, 0.10)' },
-      { from: 150, to: 250, label: 'High', tint: 'rgba(236, 131, 90, 0.14)' },
-      { from: 250, to: 500, label: 'Very high', tint: 'rgba(208, 59, 59, 0.14)' },
+      { from: 0, to: 55, label: 'Normal', tint: null, accent: '#3a9a5b' },
+      { from: 55, to: 150, label: 'Elevated', tint: 'rgba(250, 178, 25, 0.10)', accent: '#d99a00' },
+      { from: 150, to: 250, label: 'High', tint: 'rgba(236, 131, 90, 0.14)', accent: '#e0703f' },
+      { from: 250, to: 500, label: 'Very high', tint: 'rgba(208, 59, 59, 0.14)', accent: '#c93a3a' },
     ],
     explainer:
       'Hourly average of fine particles (≤ 2.5 µm) for each region. NEA uses this as the best guide for activities over the next few hours.',
@@ -46,13 +48,13 @@ export const METRICS: Record<MetricId, MetricConfig> = {
     short: 'PSI (24-hr)',
     unit: '',
     alertFrom: 100,
-    alertLabel: 'Hours above 100',
+    alertLabel: 'Hours Unhealthy or worse',
     bands: [
-      { from: 0, to: 50, label: 'Good', tint: null },
-      { from: 50, to: 100, label: 'Moderate', tint: 'rgba(250, 178, 25, 0.07)' },
-      { from: 100, to: 200, label: 'Unhealthy', tint: 'rgba(236, 131, 90, 0.14)' },
-      { from: 200, to: 300, label: 'Very unhealthy', tint: 'rgba(208, 59, 59, 0.14)' },
-      { from: 300, to: 500, label: 'Hazardous', tint: 'rgba(208, 59, 59, 0.26)' },
+      { from: 0, to: 50, label: 'Good', tint: null, accent: '#3a9a5b' },
+      { from: 50, to: 100, label: 'Moderate', tint: 'rgba(250, 178, 25, 0.07)', accent: '#d99a00' },
+      { from: 100, to: 200, label: 'Unhealthy', tint: 'rgba(236, 131, 90, 0.14)', accent: '#e0703f' },
+      { from: 200, to: 300, label: 'Very unhealthy', tint: 'rgba(208, 59, 59, 0.14)', accent: '#c93a3a' },
+      { from: 300, to: 500, label: 'Hazardous', tint: 'rgba(208, 59, 59, 0.26)', accent: '#8e1f3f' },
     ],
     explainer:
       'Pollutant Standards Index over the past 24 hours. It reacts slowly, so it lags behind sudden changes in haze.',
@@ -87,6 +89,19 @@ export const WEATHER_VIEWS: { id: WeatherView; label: string; metric: WeatherMet
   { id: 'humidity', label: 'Humidity', metric: 'humidity', unit: '%', title: 'Relative humidity' },
   { id: 'temperature', label: 'Temperature', metric: 'temperature', unit: '°C', title: 'Air temperature' },
 ];
+
+/** Order of the optional weather panels under the main chart, and the default selection. */
+export const PANEL_ORDER: WeatherView[] = ['humidity', 'rainfall', 'wind', 'temperature'];
+export const DEFAULT_PANELS: WeatherView[] = ['humidity', 'wind'];
+
+/** NEA's advice for healthy people, by 24-hour PSI band (haze.gov.sg). */
+export const PSI_ADVICE: Record<string, string> = {
+  Good: 'Normal activities.',
+  Moderate: 'Normal activities.',
+  Unhealthy: 'Reduce prolonged or strenuous outdoor physical exertion.',
+  'Very unhealthy': 'Avoid prolonged or strenuous outdoor physical exertion.',
+  Hazardous: 'Minimise outdoor activity.',
+};
 
 export const WEATHER_STATIONS = [
   { id: 'nea-ws-S50', name: 'Clementi Road', region: 'West / Central' },
