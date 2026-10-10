@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AirChart, { type ChartSeries } from './AirChart';
-import WeatherChart from './WeatherChart';
+import Meteogram, { type ChartSeries, type Panel } from './Meteogram';
 import CalibrationChart, { type CalibrationPoint } from './CalibrationChart';
 import { sameZoom, type Zoom } from './zoom';
 import {
+  DEFAULT_PANELS,
   DEVICES,
   METRICS,
+  PANEL_ORDER,
+  PSI_ADVICE,
   RANGE_PRESETS,
   WEATHER_COLOR,
   WEATHER_STATIONS,
@@ -41,7 +43,8 @@ interface State {
   metric: MetricId;
   devices: string[];
   range: Range;
-  weather: WeatherView;
+  /** Weather panels under the main chart, in PANEL_ORDER. */
+  panels: WeatherView[];
   station: string;
   /** Unlisted citizen sensor, only present when opened with ?sensor=… */
   sensor: string | null;
@@ -51,7 +54,7 @@ const DEFAULT_STATE: State = {
   metric: 'pm25_1h',
   devices: DEVICES.map((d) => d.id),
   range: { preset: '3d' },
-  weather: 'wind',
+  panels: DEFAULT_PANELS,
   station: 'nea-ws-S50',
   sensor: null,
 };
@@ -84,10 +87,12 @@ function readUrl(): State {
   let range: Range = DEFAULT_STATE.range;
   if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) range = { preset: 'custom', from, to };
   else if (RANGE_PRESETS.some((p) => p.id === preset)) range = { preset: preset as RangePresetId };
-  const weather = WEATHER_VIEWS.some((w) => w.id === q.get('weather')) ? (q.get('weather') as WeatherView) : DEFAULT_STATE.weather;
+  // `panels=humidity,wind`; older links used a single `weather=…`.
+  const rawPanels = q.has('panels') ? (q.get('panels') ?? '').split(',') : q.has('weather') ? [q.get('weather') ?? ''] : null;
+  const panels = rawPanels ? PANEL_ORDER.filter((id) => rawPanels.includes(id)) : DEFAULT_STATE.panels;
   const station = WEATHER_STATIONS.some((w) => w.id === `nea-ws-${q.get('station')}`) ? `nea-ws-${q.get('station')}` : DEFAULT_STATE.station;
   const sensor = CITIZEN_ID.test(q.get('sensor') ?? '') ? q.get('sensor') : null;
-  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, weather, station, sensor };
+  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, panels, station, sensor };
 }
 
 function writeUrl(s: State) {
@@ -98,7 +103,7 @@ function writeUrl(s: State) {
     q.set('from', s.range.from);
     q.set('to', s.range.to);
   } else q.set('range', s.range.preset);
-  q.set('weather', s.weather);
+  q.set('panels', s.panels.join(',') || 'none');
   q.set('station', s.station.replace('nea-ws-', ''));
   if (s.sensor) q.set('sensor', s.sensor);
   window.history.replaceState(null, '', `?${q.toString()}`);
@@ -137,7 +142,8 @@ export default function Dashboard() {
   const [zoom, setZoom] = useState<Zoom>(null);
   const onZoom = useCallback((z: Zoom) => setZoom((prev) => (sameZoom(prev, z) ? prev : z)), []);
   const [copied, setCopied] = useState(false);
-  const [weatherData, setWeatherData] = useState<{ values: Point[]; dirs: Point[]; bucket: string } | null>(null);
+  const [weatherData, setWeatherData] = useState<{ byMetric: Record<string, Point[]>; key: string } | null>(null);
+  const [now, setNow] = useState<{ pm: Point[]; psi: Point[] } | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [calibration, setCalibration] = useState<CalibrationPoint[] | null>(null);
   const dark = useDarkMode();
@@ -176,27 +182,46 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.metric, state.devices, state.range, state.sensor, ready]);
 
-  // Weather for exactly the same time window as the main chart.
+  // Weather panels for exactly the same time window as the main chart.
   useEffect(() => {
-    if (!data || data.demo) return;
-    const view = WEATHER_VIEWS.find((w) => w.id === state.weather)!;
+    if (!data || data.demo || !state.panels.length) return;
+    const metrics = state.panels.map((id) => WEATHER_VIEWS.find((w) => w.id === id)!.metric as string);
+    if (state.panels.includes('wind')) metrics.push('wind_dir');
     const ctrl = new AbortController();
     const q = (metric: string) =>
       fetch(`/api/series?metric=${metric}&devices=${state.station}&from=${data.from}&to=${data.to}&fixed=1`, { signal: ctrl.signal }).then(
         async (r) => {
           const json = (await r.json()) as ApiResult;
           if (!r.ok) throw new Error(json.error ?? 'Could not load weather data');
-          return json;
+          return [metric, json.points] as const;
         },
       );
     setWeatherError(null);
-    Promise.all([q(view.metric), view.id === 'wind' ? q('wind_dir') : Promise.resolve(null)])
-      .then(([vals, dirs]) => setWeatherData({ values: vals.points, dirs: dirs?.points ?? [], bucket: vals.bucket }))
+    Promise.all(metrics.map(q))
+      .then((pairs) => setWeatherData({ byMetric: Object.fromEntries(pairs), key: `${data.from}|${state.station}` }))
       .catch((e: Error) => {
         if (e.name !== 'AbortError') setWeatherError(e.message);
       });
     return () => ctrl.abort();
-  }, [data, state.weather, state.station]);
+  }, [data, state.panels, state.station]);
+
+  // "Right now": latest PM2.5 and 24-hour PSI for all regions, independent of the chart settings.
+  useEffect(() => {
+    const load = () => {
+      const to = new Date();
+      const from = new Date(to.getTime() - 6 * 3600_000);
+      const q = (metric: string) =>
+        fetch(`/api/series?metric=${metric}&devices=${DEVICES.map((d) => d.id).join(',')}&from=${from.toISOString()}&to=${to.toISOString()}`)
+          .then((r) => r.json() as Promise<ApiResult>)
+          .then((j) => j.points ?? []);
+      Promise.all([q('pm25_1h'), q('psi_24h')])
+        .then(([pm, psi]) => setNow({ pm, psi }))
+        .catch(() => setNow(null));
+    };
+    load();
+    const id = setInterval(load, 10 * 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Calibration: always the last 14 days, own sensor vs the mean of NEA West and Central.
   useEffect(() => {
@@ -280,16 +305,48 @@ export default function Dashboard() {
   // Only the official NEA values count for the summary, table and CSV.
   const neaPoints = useMemo(() => (data?.points ?? []).filter((p) => p.device.startsWith('nea-')), [data]);
 
-  const weatherView = WEATHER_VIEWS.find((w) => w.id === state.weather)!;
   const weatherStation = WEATHER_STATIONS.find((w) => w.id === state.station)!;
-  const weatherValues = useMemo(
-    () => (weatherData ? withGaps(weatherData.values, state.station, step) : []),
-    [weatherData, state.station, step],
-  );
-  const weatherDirs = useMemo(
-    () => (weatherData?.dirs ?? []).map((p) => [Date.parse(p.t), p.v] as [number, number]),
-    [weatherData],
-  );
+  const panels: Panel[] = useMemo(() => {
+    if (!data || data.demo || !weatherData) return [];
+    return state.panels.flatMap((id) => {
+      const view = WEATHER_VIEWS.find((w) => w.id === id)!;
+      const pts = weatherData.byMetric[view.metric];
+      if (!pts) return [];
+      return [
+        {
+          id,
+          name: view.label,
+          unit: view.unit,
+          values: withGaps(pts, state.station, step),
+          directions: id === 'wind' ? (weatherData.byMetric.wind_dir ?? []).map((p) => [Date.parse(p.t), p.v] as [number, number]) : undefined,
+        },
+      ];
+    });
+  }, [data, weatherData, state.panels, state.station, step]);
+
+  const status = useMemo(() => {
+    if (!now?.pm.length) return null;
+    const latestOf = (pts: Point[]) => {
+      const t = Math.max(...pts.map((p) => Date.parse(p.t)));
+      const top = pts.filter((p) => Date.parse(p.t) === t).sort((a, b) => b.v - a.v)[0];
+      return { t, v: top.v, where: DEVICES.find((d) => d.id === top.device)?.name ?? top.device };
+    };
+    const band = (bands: { from: number; to: number; label: string; accent: string }[], v: number) =>
+      bands.find((b) => v >= b.from && v < b.to) ?? bands[bands.length - 1];
+    const pm = latestOf(now.pm);
+    const psi = now.psi.length ? latestOf(now.psi) : null;
+    return {
+      pm: { ...pm, band: band(METRICS.pm25_1h.bands, pm.v) },
+      psi: psi ? { ...psi, band: band(METRICS.psi_24h.bands, psi.v) } : null,
+    };
+  }, [now]);
+
+  function togglePanel(id: WeatherView) {
+    setState((s) => ({
+      ...s,
+      panels: PANEL_ORDER.filter((p) => (p === id ? !s.panels.includes(id) : s.panels.includes(p))),
+    }));
+  }
 
   const stats = useMemo(() => {
     if (!neaPoints.length) return null;
@@ -319,7 +376,7 @@ export default function Dashboard() {
   const windowLabel = zoom
     ? `${fmtDateTime(hour(zoom.from), daily)} – ${fmtDateTime(hour(zoom.to), daily)} (zoomed in)`
     : data
-      ? `${fmtDateTime(data.from, daily)} – ${fmtDateTime(data.to, daily)}`
+      ? `${fmtDateTime(hour(Date.parse(data.from)), daily)} – ${fmtDateTime(hour(Date.parse(data.to)), daily)}`
       : '';
 
   const table = useMemo(() => {
@@ -373,7 +430,7 @@ export default function Dashboard() {
       <header className="header">
         <p className="eyebrow">Air Quality Lab · Singapore</p>
         <h1>How is the air today?</h1>
-        <p className="lede">Official hourly readings from the National Environment Agency, by region. Zoom in on any day, compare regions, download the data.</p>
+        <p className="lede">Official readings from the National Environment Agency for all five regions, with the weather that explains them.</p>
       </header>
 
       {data?.demo && (
@@ -382,7 +439,44 @@ export default function Dashboard() {
         </div>
       )}
 
-      <section className="controls" aria-label="Filters">
+      {status && (
+        <section className="status" aria-label="Right now" style={{ ['--accent-band' as string]: (status.psi ?? status.pm).band.accent }}>
+          <div className="status-row">
+            <div>
+              <p className="status-kicker">Right now · PM2.5, last hour</p>
+              <p className="status-value">
+                <span className="badge" style={{ background: status.pm.band.accent }}>{status.pm.band.label}</span>
+                <b>{fmtValue(status.pm.v)}</b> <span className="unit">µg/m³</span>
+              </p>
+              <p className="status-sub">Highest of the 5 regions: {status.pm.where}</p>
+            </div>
+            {status.psi && (
+              <div>
+                <p className="status-kicker">Last 24 hours · PSI</p>
+                <p className="status-value">
+                  <span className="badge" style={{ background: status.psi.band.accent }}>{status.psi.band.label}</span>
+                  <b>{fmtValue(status.psi.v)}</b>
+                </p>
+                <p className="status-sub">Highest of the 5 regions: {status.psi.where}</p>
+              </div>
+            )}
+          </div>
+          {status.psi && (
+            <p className="status-advice">
+              <b>NEA advice for healthy people:</b> {PSI_ADVICE[status.psi.band.label]} Elderly people, children, pregnant women and people with heart or lung
+              conditions should take more care.{' '}
+              <a href="https://www.haze.gov.sg" target="_blank" rel="noreferrer">
+                Full advisory
+              </a>
+            </p>
+          )}
+          <p className="status-foot">
+            Latest NEA reading {fmtDateTime(status.pm.t)} · updated every hour
+          </p>
+        </section>
+      )}
+
+      <section className="controls" aria-label="What and when">
         <div className="segmented" role="radiogroup" aria-label="Measure">
           {Object.values(METRICS).map((m) => (
             <button
@@ -447,63 +541,72 @@ export default function Dashboard() {
             </label>
           </div>
         )}
-
-        <div className="chips" role="group" aria-label="Regions">
-          {DEVICES.map((d) => {
-            const on = state.devices.includes(d.id);
-            return (
-              <button key={d.id} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => toggleDevice(d.id)}>
-                <span className="swatch" style={{ background: dark ? d.color.dark : d.color.light }} aria-hidden />
-                {d.name}
-              </button>
-            );
-          })}
-          {state.sensor && state.metric === 'pm25_1h' && (
-            <span className="chip on" title="Your own sensor, uncalibrated. Only visible with this link.">
-              <span className="swatch dashed" style={{ borderColor: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light }} aria-hidden />
-              My sensor
-            </span>
-          )}
-        </div>
       </section>
 
-      {stats && !daily && (
-        <p className="freshness">
-          Latest NEA reading: <b>{stats.latest.when}</b> · updated every hour
-        </p>
-      )}
-
-      <section className="tiles" aria-label="Summary">
-        <Tile label={daily ? 'Latest day' : 'Latest hour, highest region'} value={stats?.latest.value} unit={metric.unit} sub={stats ? `${stats.latest.where} · ${stats.latest.when}` : ''} metricBands={metric.bands} />
-        <Tile label="Peak" value={stats?.peak?.value} unit={metric.unit} sub={stats?.peak ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
-        <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="All selected regions" />
-        <Tile
-          label={daily ? `Days averaging above ${metric.alertFrom}` : metric.alertLabel}
-          value={stats?.above}
-          unit={daily ? 'days' : 'hours'}
-          sub="In any selected region"
-        />
-      </section>
-      {windowLabel && <p className="window-label">Peak, average and hours: {windowLabel}</p>}
-
-      <section className="card chart-card" aria-busy={loading}>
+      <section className="card chart-card" aria-busy={loading} aria-label="Chart">
         <div className="chart-head">
-          <div>
-            <h2>{metric.label}</h2>
-            <p className="hint">Drag across the chart to zoom into a period · scroll to zoom · move the slider below</p>
+          <div className="chips" role="group" aria-label="Regions (tap to show or hide)">
+            {DEVICES.map((d) => {
+              const on = state.devices.includes(d.id);
+              return (
+                <button key={d.id} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => toggleDevice(d.id)}>
+                  <span className="swatch" style={{ background: dark ? d.color.dark : d.color.light }} aria-hidden />
+                  {d.name}
+                </button>
+              );
+            })}
+            {state.sensor && state.metric === 'pm25_1h' && (
+              <span className="chip on" title="Your own sensor, uncalibrated. Only visible with this link.">
+                <span className="swatch dashed" style={{ borderColor: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light }} aria-hidden />
+                My sensor
+              </span>
+            )}
           </div>
           <button className="ghost" onClick={() => setZoom(null)} disabled={!zoom}>
             Reset zoom
           </button>
         </div>
+
+        {!data?.demo && (
+          <div className="panel-bar">
+            <span className="panel-bar-label">Weather below:</span>
+            <div className="chips" role="group" aria-label="Weather panels">
+              {PANEL_ORDER.map((id) => {
+                const view = WEATHER_VIEWS.find((w) => w.id === id)!;
+                const on = state.panels.includes(id);
+                return (
+                  <button key={id} className={`chip small ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => togglePanel(id)}>
+                    {on ? '✓ ' : '+ '}
+                    {view.label}
+                  </button>
+                );
+              })}
+            </div>
+            {state.panels.length > 0 && (
+              <label className="select">
+                Station
+                <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
+                  {WEATHER_STATIONS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.region})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        )}
+
         {error ? (
           <div className="empty">{error}</div>
         ) : data && !data.points.length && !loading ? (
           <div className="empty">No readings for this period yet.</div>
         ) : (
-          <AirChart
+          <Meteogram
             series={chartSeries}
             metric={metric}
+            panels={panels}
+            weatherColor={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
             daily={daily}
             dark={dark}
             xMin={xMin}
@@ -513,68 +616,34 @@ export default function Dashboard() {
           />
         )}
         {loading && <div className="loading" aria-hidden />}
-        {daily && <p className="hint">Long period: values are daily averages.</p>}
+        <div className="chart-notes">
+          <p>Drag across any panel to zoom in · scroll to zoom · move the slider · tap a region to show or hide it</p>
+          {daily && <p>Long period: values are daily averages.</p>}
+          {weatherError && <p>Weather: {weatherError}</p>}
+          {state.panels.length > 0 && !data?.demo && (
+            <p>
+              Weather from NEA station {weatherStation.name}.{state.panels.includes('wind') && !daily ? ' Arrows show where the wind blows to (up = north).' : ''} A gap
+              means the station sent no data.
+            </p>
+          )}
+        </div>
       </section>
 
-      {data && !data.demo && (
-        <section className="card chart-card" aria-label="Weather">
-          <div className="chart-head">
-            <div>
-              <h2>{weatherView.title}</h2>
-              <p className="hint">
-                NEA weather station {weatherStation.name} ({weatherStation.region}) · same time window as the chart above
-              </p>
-            </div>
-          </div>
-          <div className="controls weather-controls">
-            <div className="segmented" role="radiogroup" aria-label="Weather measure">
-              {WEATHER_VIEWS.map((w) => (
-                <button
-                  key={w.id}
-                  role="radio"
-                  aria-checked={state.weather === w.id}
-                  className={state.weather === w.id ? 'on' : ''}
-                  onClick={() => setState((s) => ({ ...s, weather: w.id }))}
-                >
-                  {w.label}
-                </button>
-              ))}
-            </div>
-            <label className="select">
-              Station
-              <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
-                {WEATHER_STATIONS.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.region})
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {weatherError ? (
-            <div className="empty small">{weatherError}</div>
-          ) : weatherData && !weatherValues.length ? (
-            <div className="empty small">No weather readings for this period yet.</div>
-          ) : (
-            <WeatherChart
-              view={state.weather}
-              unit={weatherView.unit}
-              values={weatherValues}
-              directions={weatherDirs}
-              color={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
-              daily={daily}
-              dark={dark}
-              xMin={xMin}
-              xMax={xMax}
-              zoom={zoom}
-              onZoom={onZoom}
-            />
-          )}
-          {state.weather === 'wind' && !daily && (
-            <p className="hint">Arrows show where the wind blows to (up = north). Smoke from Sumatra arrives with wind from the south-west.</p>
-          )}
-        </section>
-      )}
+      <section className="summary" aria-label="Summary of this period">
+        <h2 className="summary-title">
+          Summary <span>{windowLabel}</span>
+        </h2>
+        <div className="tiles tiles-3">
+          <Tile label="Peak" value={stats?.peak?.value} unit={metric.unit} sub={stats?.peak ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
+          <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="All selected regions" />
+          <Tile
+            label={daily ? `Days averaging above ${metric.alertFrom}` : metric.alertLabel}
+            value={stats?.above}
+            unit={daily ? 'days' : 'hours'}
+            sub={`Above ${metric.alertFrom} in any selected region`}
+          />
+        </div>
+      </section>
 
       {state.sensor && (
         <section className="card chart-card" aria-label="My sensor calibration">
