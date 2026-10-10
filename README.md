@@ -34,8 +34,11 @@ The database uses one generic time-series model (`devices`, `metrics`, `observat
 2. **Collector:** in GitHub → Settings → Secrets and variables → Actions, add
    - `SUPABASE_URL` – e.g. `https://xxxx.supabase.co`
    - `SUPABASE_SECRET_KEY` – the secret key from Supabase → Project Settings → API Keys
-3. **Backfill:** GitHub → Actions → *Collect NEA readings* → *Run workflow*, with a start date (e.g. `2026-09-01`).
-4. **Website:** import the repository in Vercel and set the environment variables
+3. **Reliable hourly start:** GitHub's own schedule often skips runs. Run `supabase/migrations/20261010100000_hourly_trigger.sql` in the Supabase SQL editor, then store a fine-grained GitHub token (repository *Actions: read and write* only) with
+   `select vault.create_secret('<token>', 'github_dispatch_token');`
+   Supabase then starts the collector at :10 every hour. The GitHub schedule stays as a backup.
+4. **Backfill:** GitHub → Actions → *Collect NEA readings* → *Run workflow*, with a start date (e.g. `2026-09-01`).
+5. **Website:** import the repository in Vercel and set the environment variables
    - `SUPABASE_URL`
    - `SUPABASE_PUBLISHABLE_KEY` – the publishable key (read-only)
 
