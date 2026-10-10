@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AirChart, { type ChartSeries } from './AirChart';
 import WeatherChart from './WeatherChart';
 import CalibrationChart, { type CalibrationPoint } from './CalibrationChart';
+import { sameZoom, type Zoom } from './zoom';
 import {
   DEVICES,
   METRICS,
@@ -54,8 +55,6 @@ const DEFAULT_STATE: State = {
   station: 'nea-ws-S50',
   sensor: null,
 };
-
-const CHART_GROUP = 'air-quality';
 
 /** Sorted [time, value] pairs with a null inserted where readings are missing, so lines break instead of bridging. */
 function withGaps(points: Point[], device: string, step: number): [number, number | null][] {
@@ -135,7 +134,8 @@ export default function Dashboard() {
   const [data, setData] = useState<ApiResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [resetKey, setResetKey] = useState(0);
+  const [zoom, setZoom] = useState<Zoom>(null);
+  const onZoom = useCallback((z: Zoom) => setZoom((prev) => (sameZoom(prev, z) ? prev : z)), []);
   const [copied, setCopied] = useState(false);
   const [weatherData, setWeatherData] = useState<{ values: Point[]; dirs: Point[]; bucket: string } | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
@@ -150,6 +150,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (ready) writeUrl(state);
   }, [state, ready]);
+
+  // A new period starts unzoomed.
+  useEffect(() => setZoom(null), [state.range]);
 
   useEffect(() => {
     if (!ready) return;
@@ -289,27 +292,35 @@ export default function Dashboard() {
   );
 
   const stats = useMemo(() => {
-    const pts = neaPoints;
-    if (!pts.length) return null;
+    if (!neaPoints.length) return null;
     const name = (id: string) => DEVICES.find((d) => d.id === id)?.name ?? id;
+    // "Latest" always means now; the other numbers follow the zoomed window.
+    let latestT = 0;
+    for (const p of neaPoints) latestT = Math.max(latestT, Date.parse(p.t));
+    const latest = neaPoints.filter((p) => Date.parse(p.t) === latestT).sort((a, b) => b.v - a.v)[0];
+    const pts = zoom ? neaPoints.filter((p) => Date.parse(p.t) >= zoom.from && Date.parse(p.t) <= zoom.to) : neaPoints;
     let peak = pts[0];
     let sum = 0;
-    let latestT = 0;
     const above = new Set<string>();
     for (const p of pts) {
       if (p.v > peak.v) peak = p;
       sum += p.v;
-      latestT = Math.max(latestT, Date.parse(p.t));
       if (p.v > metric.alertFrom) above.add(p.t);
     }
-    const latest = pts.filter((p) => Date.parse(p.t) === latestT).sort((a, b) => b.v - a.v)[0];
     return {
-      latest: { value: latest.v, where: name(latest.device), when: fmtDateTime(latestT, daily) },
-      peak: { value: peak.v, where: name(peak.device), when: fmtDateTime(peak.t, daily) },
-      mean: sum / pts.length,
+      latest: { value: latest.v, where: name(latest.device), when: fmtDateTime(latestT, daily), t: latestT },
+      peak: peak ? { value: peak.v, where: name(peak.device), when: fmtDateTime(peak.t, daily) } : null,
+      mean: pts.length ? sum / pts.length : null,
       above: above.size,
     };
-  }, [neaPoints, metric, daily]);
+  }, [neaPoints, metric, daily, zoom]);
+
+  const hour = (t: number) => Math.round(t / 3600_000) * 3600_000;
+  const windowLabel = zoom
+    ? `${fmtDateTime(hour(zoom.from), daily)} – ${fmtDateTime(hour(zoom.to), daily)} (zoomed in)`
+    : data
+      ? `${fmtDateTime(data.from, daily)} – ${fmtDateTime(data.to, daily)}`
+      : '';
 
   const table = useMemo(() => {
     const byT = new Map<string, Record<string, number>>();
@@ -456,10 +467,16 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {stats && !daily && (
+        <p className="freshness">
+          Latest NEA reading: <b>{stats.latest.when}</b> · updated every hour
+        </p>
+      )}
+
       <section className="tiles" aria-label="Summary">
         <Tile label={daily ? 'Latest day' : 'Latest hour, highest region'} value={stats?.latest.value} unit={metric.unit} sub={stats ? `${stats.latest.where} · ${stats.latest.when}` : ''} metricBands={metric.bands} />
-        <Tile label="Peak in this period" value={stats?.peak.value} unit={metric.unit} sub={stats ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
-        <Tile label="Average" value={stats ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="All selected regions" metricBands={metric.bands} />
+        <Tile label="Peak" value={stats?.peak?.value} unit={metric.unit} sub={stats?.peak ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
+        <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="All selected regions" />
         <Tile
           label={daily ? `Days averaging above ${metric.alertFrom}` : metric.alertLabel}
           value={stats?.above}
@@ -467,6 +484,7 @@ export default function Dashboard() {
           sub="In any selected region"
         />
       </section>
+      {windowLabel && <p className="window-label">Peak, average and hours: {windowLabel}</p>}
 
       <section className="card chart-card" aria-busy={loading}>
         <div className="chart-head">
@@ -474,7 +492,7 @@ export default function Dashboard() {
             <h2>{metric.label}</h2>
             <p className="hint">Drag across the chart to zoom into a period · scroll to zoom · move the slider below</p>
           </div>
-          <button className="ghost" onClick={() => setResetKey((k) => k + 1)}>
+          <button className="ghost" onClick={() => setZoom(null)} disabled={!zoom}>
             Reset zoom
           </button>
         </div>
@@ -488,10 +506,10 @@ export default function Dashboard() {
             metric={metric}
             daily={daily}
             dark={dark}
-            resetKey={resetKey}
             xMin={xMin}
             xMax={xMax}
-            group={CHART_GROUP}
+            zoom={zoom}
+            onZoom={onZoom}
           />
         )}
         {loading && <div className="loading" aria-hidden />}
@@ -546,10 +564,10 @@ export default function Dashboard() {
               color={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
               daily={daily}
               dark={dark}
-              resetKey={resetKey}
               xMin={xMin}
               xMax={xMax}
-              group={CHART_GROUP}
+              zoom={zoom}
+              onZoom={onZoom}
             />
           )}
           {state.weather === 'wind' && !daily && (
@@ -618,7 +636,7 @@ export default function Dashboard() {
             </li>
           ))}
         </ul>
-        <p className="muted">Each region value is an average of several NEA monitoring stations, so conditions in your street can differ.</p>
+        <p className="muted">Each region value comes from NEA's monitoring in that part of Singapore, so conditions in your street can differ.</p>
       </section>
 
       <details className="card table-card">

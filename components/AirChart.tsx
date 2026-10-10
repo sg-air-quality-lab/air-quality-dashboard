@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { ECharts, EChartsOption } from 'echarts';
 import type { MetricConfig } from '@/lib/config';
 import { fmtDateTime, fmtValue } from '@/lib/format';
+import { bindZoom, type Zoom } from './zoom';
 
 export interface ChartSeries {
   id: string;
@@ -19,11 +20,12 @@ interface Props {
   metric: MetricConfig;
   daily: boolean;
   dark: boolean;
-  resetKey: number;
-  /** Fixed time window, so charts in the same group zoom in step. */
+  /** Full time window of the data. */
   xMin?: number;
   xMax?: number;
-  group?: string;
+  /** Shared zoom window; every chart on the page follows it. */
+  zoom: Zoom;
+  onZoom: (z: Zoom) => void;
 }
 
 const INK = {
@@ -31,12 +33,15 @@ const INK = {
   dark: { muted: '#898781', secondary: '#c3c2b7', primary: '#ffffff', grid: '#2c2c2a', axis: '#383835', surface: '#1a1a19' },
 };
 
-export default function AirChart({ series, metric, daily, dark, resetKey, xMin, xMax, group }: Props) {
+export default function AirChart({ series, metric, daily, dark, xMin, xMax, zoom, onZoom }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<ECharts | null>(null);
   // Always points at the latest render function, so the async chart init never uses stale props.
   const renderRef = useRef<() => void>(() => {});
   renderRef.current = render;
+  const latest = useRef({ zoom, onZoom });
+  latest.current = { zoom, onZoom };
+  const syncZoom = useRef<() => void>(() => {});
 
   // Create the chart once
   useEffect(() => {
@@ -45,10 +50,7 @@ export default function AirChart({ series, metric, daily, dark, resetKey, xMin, 
     import('echarts').then((echarts) => {
       if (disposed || !el.current) return;
       chart.current = echarts.init(el.current, undefined, { renderer: 'canvas' });
-      if (group) {
-        chart.current.group = group;
-        echarts.connect(group);
-      }
+      syncZoom.current = bindZoom(chart.current, () => latest.current);
       observer = new ResizeObserver(() => chart.current?.resize());
       observer.observe(el.current);
       renderRef.current();
@@ -68,8 +70,8 @@ export default function AirChart({ series, metric, daily, dark, resetKey, xMin, 
   }, [series, metric, daily, dark, xMin, xMax]);
 
   useEffect(() => {
-    chart.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-  }, [resetKey]);
+    syncZoom.current();
+  }, [zoom]);
 
   function render() {
     const c = chart.current;
@@ -196,6 +198,7 @@ export default function AirChart({ series, metric, daily, dark, resetKey, xMin, 
     };
 
     c.setOption(option, { notMerge: true });
+    syncZoom.current();
     // Default mouse mode: drag a box to zoom into that time window.
     // Not on touch screens, where dragging must keep scrolling the page.
     const touch = window.matchMedia('(pointer: coarse)').matches;
