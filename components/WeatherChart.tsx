@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { ECharts, EChartsOption } from 'echarts';
 import { compass, type WeatherView } from '@/lib/config';
 import { fmtDateTime, fmtValue } from '@/lib/format';
+import { bindZoom, type Zoom } from './zoom';
 
 interface Props {
   view: WeatherView;
@@ -15,10 +16,10 @@ interface Props {
   color: string;
   daily: boolean;
   dark: boolean;
-  resetKey: number;
   xMin?: number;
   xMax?: number;
-  group?: string;
+  zoom: Zoom;
+  onZoom: (z: Zoom) => void;
 }
 
 const INK = {
@@ -31,6 +32,9 @@ export default function WeatherChart(props: Props) {
   const chart = useRef<ECharts | null>(null);
   const renderRef = useRef<() => void>(() => {});
   renderRef.current = render;
+  const latest = useRef({ zoom: props.zoom, onZoom: props.onZoom });
+  latest.current = { zoom: props.zoom, onZoom: props.onZoom };
+  const syncZoom = useRef<() => void>(() => {});
 
   useEffect(() => {
     let disposed = false;
@@ -38,10 +42,7 @@ export default function WeatherChart(props: Props) {
     import('echarts').then((echarts) => {
       if (disposed || !el.current) return;
       chart.current = echarts.init(el.current, undefined, { renderer: 'canvas' });
-      if (props.group) {
-        chart.current.group = props.group;
-        echarts.connect(props.group);
-      }
+      syncZoom.current = bindZoom(chart.current, () => latest.current);
       observer = new ResizeObserver(() => chart.current?.resize());
       observer.observe(el.current);
       renderRef.current();
@@ -60,8 +61,8 @@ export default function WeatherChart(props: Props) {
   }, [props.view, props.values, props.directions, props.color, props.daily, props.dark, props.xMin, props.xMax]);
 
   useEffect(() => {
-    chart.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-  }, [props.resetKey]);
+    syncZoom.current();
+  }, [props.zoom]);
 
   function render() {
     const c = chart.current;
@@ -167,6 +168,7 @@ export default function WeatherChart(props: Props) {
     };
 
     c.setOption(option, { notMerge: true });
+    syncZoom.current();
     const touch = window.matchMedia('(pointer: coarse)').matches;
     c.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: !touch });
   }

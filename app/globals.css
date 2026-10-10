@@ -486,3 +486,20 @@ th {
   border-radius: 0;
   opacity: 1;
 }
+
+.freshness {
+  margin: -4px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.window-label {
+  margin: -6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
