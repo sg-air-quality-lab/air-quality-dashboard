@@ -2,7 +2,7 @@ name: Collect NEA readings
 
 on:
   schedule:
-    - cron: '7 * * * *'   # every hour at :07, after NEA publishes the hourly value
+    - cron: '7 * * * *'   # backup only: GitHub often skips these; Supabase pg_cron starts the run at :10 (see supabase/migrations)
   workflow_dispatch:
     inputs:
       from:
