@@ -903,3 +903,84 @@ th {
     font-size: 44px;
   }
 }
+
+/* Phones: tighter so values and the chart share the first screen */
+@media (max-width: 560px) {
+  .topbar .eyebrow {
+    display: none;
+  }
+
+  .topbar h1 {
+    font-size: 21px;
+  }
+
+  .updated {
+    font-size: 12px;
+  }
+
+  .now-tiles {
+    gap: 8px;
+  }
+
+  .now-tile {
+    padding: 8px 10px 9px;
+    gap: 2px;
+    border-left-width: 4px;
+  }
+
+  .now-kicker {
+    font-size: 12px;
+  }
+
+  .now-value {
+    font-size: 30px;
+  }
+
+  .now-unit {
+    font-size: 12px;
+  }
+
+  .now-tile .badge {
+    font-size: 11px;
+    padding: 0 8px;
+  }
+
+  .now-sub {
+    font-size: 11px;
+  }
+
+  .advice {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .regions {
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .region {
+    padding: 5px 7px 4px;
+  }
+
+  .region .swatch {
+    width: 14px;
+    height: 3px;
+  }
+
+  .region-name {
+    font-size: 11px;
+  }
+
+  .region-value {
+    font-size: 15px;
+  }
+
+  .segmented.range button {
+    padding: 4px 0;
+  }
+
+  .meteogram {
+    margin-top: 2px;
+  }
+}

@@ -92,7 +92,7 @@ export const WEATHER_VIEWS: { id: WeatherView; label: string; metric: WeatherMet
 
 /** Order of the optional weather panels under the main chart, and the default selection. */
 export const PANEL_ORDER: WeatherView[] = ['humidity', 'rainfall', 'wind', 'temperature'];
-export const DEFAULT_PANELS: WeatherView[] = ['humidity', 'wind'];
+export const DEFAULT_PANELS: WeatherView[] = []; // clean start: weather only on request
 
 /** NEA's advice for healthy people, by 24-hour PSI band (haze.gov.sg). */
 export const PSI_ADVICE: Record<string, string> = {

@@ -55,7 +55,7 @@ interface State {
 
 const DEFAULT_STATE: State = {
   metric: 'pm25_1h',
-  devices: DEVICES.map((d) => d.id),
+  devices: ['nea-central'], // the school's region; tap others to compare
   range: { preset: '3d' },
   panels: DEFAULT_PANELS,
   station: 'nea-ws-S50',
