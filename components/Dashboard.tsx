@@ -15,12 +15,15 @@ import {
   WEATHER_STATIONS,
   WEATHER_VIEWS,
   CITIZEN_ID,
+  compass,
   MY_SENSOR_COLOR,
   type MetricId,
   type RangePresetId,
   type WeatherView,
 } from '@/lib/config';
 import { fmtDateTime, fmtIsoLocal, fmtValue, sgDay } from '@/lib/format';
+import { buildExportTable, toCsv } from '@/lib/export';
+import { buildXlsx, type Cell } from '@/lib/xlsx';
 
 interface Point {
   t: string;
@@ -390,19 +393,66 @@ export default function Dashboard() {
 
   const selectedDevices = DEVICES.filter((d) => state.devices.includes(d.id));
 
-  const downloadCsv = useCallback(() => {
-    const header = ['time_sgt', ...selectedDevices.map((d) => d.name.toLowerCase())];
-    const lines = [...table]
-      .reverse()
-      .map(([t, vals]) => [fmtIsoLocal(t), ...selectedDevices.map((d) => vals[d.id] ?? '')].join(','));
-    const csv = [`# ${metric.label} (${metric.unit || 'index'}). Source: NEA via data.gov.sg`, header.join(','), ...lines].join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  // The download contains exactly what is on screen: selected regions, weather panels and the visible time window.
+  const exportTable = useCallback(() => {
+    const weatherReady = !!weatherData && !data?.demo && weatherData.key === `${data?.from}|${state.station}`;
+    const weather = weatherReady
+      ? PANEL_ORDER.filter((id) => state.panels.includes(id)).flatMap((id) => {
+          const view = WEATHER_VIEWS.find((w) => w.id === id)!;
+          const points = weatherData!.byMetric[view.metric];
+          if (!points) return [];
+          const label = id === 'wind' ? 'Wind speed' : view.title.replace(' per hour', '');
+          return [{ label, unit: view.unit, points, directions: id === 'wind' ? weatherData!.byMetric.wind_dir : undefined }];
+        })
+      : [];
+    return buildExportTable({
+      metricShort: state.metric === 'psi_24h' ? 'PSI' : 'PM2.5',
+      unit: metric.unit,
+      regions: selectedDevices.map((d) => ({ id: d.id, name: d.name })),
+      points: neaPoints,
+      weather,
+      window: zoom,
+      compass,
+    });
+  }, [weatherData, data, state.station, state.panels, state.metric, metric.unit, selectedDevices, neaPoints, zoom]);
+
+  const saveFile = (blob: Blob, ext: string) => {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `singapore-${state.metric}-${fmtIsoLocal(Date.now()).slice(0, 10)}.csv`;
+    a.download = `singapore-air-quality-${fmtIsoLocal(Date.now()).slice(0, 10)}.${ext}`;
     a.click();
-    URL.revokeObjectURL(url);
-  }, [table, selectedDevices, metric, state.metric]);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadExcel = useCallback(() => {
+    const t = exportTable();
+    const dataRows: Cell[][] = t.rows.map(([time, ...vals]) => [{ time }, ...vals]);
+    const info: Cell[][] = [
+      ['Singapore air quality: data export'],
+      [],
+      ['Values', `${metric.label}${metric.unit ? ` (${metric.unit})` : ''}`],
+      ['Regions', selectedDevices.map((d) => d.name).join(', ')],
+      ...(t.columns.length > selectedDevices.length + 1 ? [['Weather station', weatherStation.name] as Cell[]] : []),
+      ['Period', windowLabel],
+      ['Times', daily ? 'Singapore time, daily averages' : 'Singapore time, hourly values. Empty cells: no reading.'],
+      ['Created', fmtIsoLocal(Date.now())],
+      ['Link to this view', window.location.href],
+      [],
+      ['Source', 'Contains information from the National Environment Agency (NEA), accessed via data.gov.sg, licensed under the Singapore Open Data Licence.'],
+    ];
+    const bytes = buildXlsx([
+      { name: 'Data', header: t.columns.map((c) => c.header), rows: dataRows, widths: t.columns.map((c, i) => (i === 0 ? 18 : Math.max(12, c.header.length + 2))) },
+      { name: 'Info', rows: info, widths: [20, 100] },
+    ]);
+    saveFile(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'xlsx');
+  }, [exportTable, metric, selectedDevices, weatherStation, windowLabel, daily]);
+
+  const downloadCsv = useCallback(() => {
+    // The byte-order mark tells Excel the file is UTF-8, so µg/m³ and °C show correctly.
+    const csv = '﻿' + toCsv(exportTable(), (t) => fmtIsoLocal(t));
+    saveFile(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
+  }, [exportTable]);
 
   const copyLink = useCallback(async () => {
     try {
@@ -688,8 +738,12 @@ export default function Dashboard() {
       )}
 
       <section className="actions">
+        <p className="actions-note">The download contains the regions and weather panels shown above, for the time window you see.</p>
+        <button className="primary" onClick={downloadExcel} disabled={!table.length}>
+          Download for Excel
+        </button>
         <button onClick={downloadCsv} disabled={!table.length}>
-          Download CSV
+          CSV
         </button>
         <button onClick={copyLink}>{copied ? 'Link copied' : 'Copy link to this view'}</button>
       </section>

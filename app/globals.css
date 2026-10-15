@@ -356,6 +356,25 @@ summary:focus-visible {
   gap: 8px;
 }
 
+.actions button.primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.actions button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.actions-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .actions button:disabled {
   opacity: 0.5;
   cursor: default;
