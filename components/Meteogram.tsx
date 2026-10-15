@@ -4,7 +4,7 @@
 // PM2.5 or PSI on top, optional weather panels below. One crosshair runs through
 // all panels, one tooltip lists every value at that moment, one slider zooms everything.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ECharts, EChartsOption } from 'echarts';
 import { compass, type MetricConfig, type WeatherView } from '@/lib/config';
 import { fmtDateTime, fmtValue } from '@/lib/format';
@@ -50,12 +50,13 @@ const INK = {
 // Layout in pixels (top to bottom).
 const TOP = 30;
 const MAIN_H = 300;
+const MAIN_H_NARROW = 220; // phones: keep the main chart on the first screen
 const GAP = 30; // room for the next panel's name
 const PANEL_H = 96;
 const BOTTOM = 72; // time labels + slider
 
-export function meteogramHeight(panelCount: number) {
-  return TOP + MAIN_H + panelCount * (GAP + PANEL_H) + BOTTOM;
+export function meteogramHeight(panelCount: number, narrow = false) {
+  return TOP + (narrow ? MAIN_H_NARROW : MAIN_H) + panelCount * (GAP + PANEL_H) + BOTTOM;
 }
 
 export default function Meteogram(props: Props) {
@@ -66,6 +67,8 @@ export default function Meteogram(props: Props) {
   const latest = useRef({ zoom: props.zoom, onZoom: props.onZoom });
   latest.current = { zoom: props.zoom, onZoom: props.onZoom };
   const syncZoom = useRef<() => void>(() => {});
+  // Phones get a shorter main panel so it fits on the first screen together with the current values.
+  const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -75,12 +78,14 @@ export default function Meteogram(props: Props) {
       chart.current = echarts.init(el.current, undefined, { renderer: 'canvas' });
       syncZoom.current = bindZoom(chart.current, () => latest.current);
       let wasWide = (el.current.clientWidth ?? 800) >= 560;
+      setNarrow(!wasWide);
       observer = new ResizeObserver(() => {
         chart.current?.resize();
         // Band labels and margins depend on the width: redraw only when the layout changes.
         const wide = (el.current?.clientWidth ?? 800) >= 560;
         if (wide !== wasWide) {
           wasWide = wide;
+          setNarrow(!wide);
           renderRef.current();
         }
       });
@@ -109,6 +114,8 @@ export default function Meteogram(props: Props) {
     const { series, metric, panels, weatherColor, daily, dark, xMin, xMax } = props;
     const ink = dark ? INK.dark : INK.light;
     const wide = (el.current?.clientWidth ?? 800) >= 560;
+    const mainH = wide ? MAIN_H : MAIN_H_NARROW;
+    const touch = window.matchMedia('(pointer: coarse)').matches;
     const left = 48;
     const right = wide ? 92 : 14;
 
@@ -116,7 +123,9 @@ export default function Meteogram(props: Props) {
     let dataMax = 0;
     for (const s of series) for (const [, v] of s.data) if (v != null && v > dataMax) dataMax = v;
     const edges = metric.bands.map((b) => b.to);
-    const yMax = edges.find((e) => e >= dataMax * 1.05) ?? Math.ceil((dataMax * 1.1) / 50) * 50;
+    // Stop at the next band edge, unless that edge is far above the data (e.g. 500 when the peak is 265).
+    const edge = edges.find((e) => e >= dataMax * 1.05);
+    const yMax = edge != null && edge <= Math.max(dataMax * 1.6, dataMax + 60) ? edge : Math.ceil((dataMax * 1.15) / 50) * 50 || 50;
     const bandAreas = metric.bands
       .filter((b) => b.from < yMax)
       .map((b) => [
@@ -130,9 +139,9 @@ export default function Meteogram(props: Props) {
 
     const n = panels.length + 1;
     const all = Array.from({ length: n }, (_, i) => i);
-    const gridTop = (i: number) => (i === 0 ? TOP : TOP + MAIN_H + (i - 1) * (GAP + PANEL_H) + GAP);
+    const gridTop = (i: number) => (i === 0 ? TOP : TOP + mainH + (i - 1) * (GAP + PANEL_H) + GAP);
 
-    const grids = all.map((i) => ({ left, right, top: gridTop(i), height: i === 0 ? MAIN_H : PANEL_H }));
+    const grids = all.map((i) => ({ left, right, top: gridTop(i), height: i === 0 ? mainH : PANEL_H }));
 
     const xAxes = all.map((i) => ({
       type: 'time' as const,
@@ -249,7 +258,9 @@ export default function Meteogram(props: Props) {
         lineStyle: { color: ink.muted, type: 'dashed', width: 1 },
         label: { backgroundColor: ink.secondary, color: ink.surface, fontSize: 11, formatter: (p) => fmtDateTime(p.value as number, daily) },
       },
+      // Zoom-box and save buttons only with a mouse; on touch screens they are too small to hit.
       toolbox: {
+        show: !touch,
         right: 8,
         top: -4,
         itemSize: 15,
@@ -347,7 +358,6 @@ export default function Meteogram(props: Props) {
     c.setOption(option, { notMerge: true });
     syncZoom.current();
     // Mouse: drag a box to zoom. Touch screens: dragging keeps scrolling the page.
-    const touch = window.matchMedia('(pointer: coarse)').matches;
     c.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: !touch });
   }
 
@@ -355,7 +365,7 @@ export default function Meteogram(props: Props) {
     <div
       ref={el}
       className="meteogram"
-      style={{ height: meteogramHeight(props.panels.length) }}
+      style={{ height: meteogramHeight(props.panels.length, narrow) }}
       role="img"
       aria-label={`${props.metric.label}${props.panels.length ? ' with ' + props.panels.map((p) => p.name.toLowerCase()).join(', ') : ''}`}
     />

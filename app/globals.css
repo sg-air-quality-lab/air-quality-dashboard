@@ -650,3 +650,256 @@ th {
 .summary .tiles-3 {
   margin-top: 0;
 }
+
+/* ---------- at a glance: current values and chart on the first screen */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.topbar h1 {
+  font-size: clamp(22px, 3.4vw, 34px);
+  line-height: 1.15;
+  margin: 2px 0 0;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.updated {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.glance {
+  display: grid;
+  gap: 12px;
+}
+
+.now {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.now-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.now-tile {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 4px;
+  text-align: left;
+  border: 0;
+  border-left: 5px solid var(--band);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--ring);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.now-tile.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.now-kicker {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.now-value {
+  font-size: 36px;
+  line-height: 1.05;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.now-unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.now-tile .badge {
+  font-size: 12px;
+  padding: 1px 9px;
+  align-self: auto;
+}
+
+.now-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.advice {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.chart-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.chart-top h2 {
+  font-size: 16px;
+}
+
+.segmented.range {
+  flex-wrap: nowrap;
+}
+
+.segmented.range button {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.regions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.region {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ring);
+  border-radius: 10px;
+  padding: 7px 9px 6px;
+  text-align: left;
+  min-width: 0;
+  opacity: 0.45;
+}
+
+.region.on {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1.5px var(--ink-2);
+}
+
+.region .swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.region .swatch.dashed {
+  background: transparent;
+  border-top: 2px dashed;
+  height: 0;
+  border-radius: 0;
+}
+
+.region-name {
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.region-value {
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.reset-zoom {
+  display: block;
+  margin: 4px auto 0;
+}
+
+.summary .tiles-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Phones */
+@media (max-width: 560px) {
+  .page {
+    padding: 14px 12px 40px;
+    gap: 12px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+  }
+
+  .now-tile {
+    padding: 10px 12px;
+  }
+
+  .now-value {
+    font-size: 32px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  /* The y-axis already says what is shown; the time range gets the full width. */
+  .chart-top h2 {
+    display: none;
+  }
+
+  .segmented.range {
+    display: flex;
+    width: 100%;
+  }
+
+  .segmented.range button {
+    flex: 1;
+    padding: 6px 0;
+  }
+
+  .summary .tile {
+    padding: 10px;
+  }
+
+  .summary .tile-value {
+    font-size: 22px;
+  }
+
+  .summary .tile-unit {
+    display: block;
+    font-size: 12px;
+  }
+}
+
+/* Computers and large tablets in landscape: values on the left, chart on the right */
+@media (min-width: 1024px) {
+  .glance {
+    grid-template-columns: 300px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .now {
+    position: sticky;
+    top: 16px;
+  }
+
+  .now-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .now-value {
+    font-size: 44px;
+  }
+}

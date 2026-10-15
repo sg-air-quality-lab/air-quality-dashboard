@@ -21,7 +21,7 @@ import {
   type RangePresetId,
   type WeatherView,
 } from '@/lib/config';
-import { fmtDateTime, fmtIsoLocal, fmtValue, sgDay } from '@/lib/format';
+import { fmtDateTime, fmtIsoLocal, fmtTime, fmtValue, sgDay } from '@/lib/format';
 import { buildExportTable, toCsv } from '@/lib/export';
 import { buildXlsx, type Cell } from '@/lib/xlsx';
 
@@ -338,9 +338,16 @@ export default function Dashboard() {
       bands.find((b) => v >= b.from && v < b.to) ?? bands[bands.length - 1];
     const pm = latestOf(now.pm);
     const psi = now.psi.length ? latestOf(now.psi) : null;
+    // Latest value per region, for the region boxes above the chart.
+    const perRegion = (pts: Point[]) => {
+      if (!pts.length) return {} as Record<string, number>;
+      const t = Math.max(...pts.map((p) => Date.parse(p.t)));
+      return Object.fromEntries(pts.filter((p) => Date.parse(p.t) === t).map((p) => [p.device, p.v])) as Record<string, number>;
+    };
     return {
       pm: { ...pm, band: band(METRICS.pm25_1h.bands, pm.v) },
       psi: psi ? { ...psi, band: band(METRICS.psi_24h.bands, psi.v) } : null,
+      regions: { pm25_1h: perRegion(now.pm), psi_24h: perRegion(now.psi) } as Record<MetricId, Record<string, number>>,
     };
   }, [now]);
 
@@ -477,10 +484,12 @@ export default function Dashboard() {
 
   return (
     <main className="page">
-      <header className="header">
-        <p className="eyebrow">Air Quality Lab · Singapore</p>
-        <h1>How is the air today?</h1>
-        <p className="lede">Official readings from the National Environment Agency for all five regions, with the weather that explains them.</p>
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Air Quality Lab · Singapore</p>
+          <h1>How is the air today?</h1>
+        </div>
+        {status && <p className="updated">Updated {fmtTime(status.pm.t)}</p>}
       </header>
 
       {data?.demo && (
@@ -489,208 +498,196 @@ export default function Dashboard() {
         </div>
       )}
 
-      {status && (
-        <section className="status" aria-label="Right now" style={{ ['--accent-band' as string]: (status.psi ?? status.pm).band.accent }}>
-          <div className="status-row">
-            <div>
-              <p className="status-kicker">Right now · PM2.5, last hour</p>
-              <p className="status-value">
-                <span className="badge" style={{ background: status.pm.band.accent }}>{status.pm.band.label}</span>
-                <b>{fmtValue(status.pm.v)}</b> <span className="unit">µg/m³</span>
-              </p>
-              <p className="status-sub">Highest of the 5 regions: {status.pm.where}</p>
-            </div>
-            {status.psi && (
-              <div>
-                <p className="status-kicker">Last 24 hours · PSI</p>
-                <p className="status-value">
-                  <span className="badge" style={{ background: status.psi.band.accent }}>{status.psi.band.label}</span>
-                  <b>{fmtValue(status.psi.v)}</b>
-                </p>
-                <p className="status-sub">Highest of the 5 regions: {status.psi.where}</p>
-              </div>
-            )}
+      <div className="glance">
+        <section className="now" aria-label="Right now">
+          <div className="now-tiles" role="radiogroup" aria-label="Shown in the chart">
+            <NowTile
+              kicker="PM2.5 · last hour"
+              value={status?.pm.v}
+              unit="µg/m³"
+              band={status?.pm.band}
+              sub={status ? `Highest region: ${status.pm.where}` : 'Loading…'}
+              selected={state.metric === 'pm25_1h'}
+              onSelect={() => setState((s) => ({ ...s, metric: 'pm25_1h' }))}
+            />
+            <NowTile
+              kicker="PSI · 24 hours"
+              value={status?.psi?.v}
+              band={status?.psi?.band}
+              sub={status?.psi ? `Highest region: ${status.psi.where}` : status ? 'No reading' : 'Loading…'}
+              selected={state.metric === 'psi_24h'}
+              onSelect={() => setState((s) => ({ ...s, metric: 'psi_24h' }))}
+            />
           </div>
-          {status.psi && (
-            <p className="status-advice">
-              <b>NEA advice for healthy people:</b> {PSI_ADVICE[status.psi.band.label]} Elderly people, children, pregnant women and people with heart or lung
-              conditions should take more care.{' '}
+          {status?.psi && (
+            <p className="advice">
+              <b>NEA advice:</b> {PSI_ADVICE[status.psi.band.label]}{' '}
               <a href="https://www.haze.gov.sg" target="_blank" rel="noreferrer">
-                Full advisory
+                More
               </a>
             </p>
           )}
-          <p className="status-foot">
-            Latest NEA reading {fmtDateTime(status.pm.t)} · updated every hour
-          </p>
         </section>
-      )}
 
-      <section className="controls" aria-label="What and when">
-        <div className="segmented" role="radiogroup" aria-label="Measure">
-          {Object.values(METRICS).map((m) => (
-            <button
-              key={m.id}
-              role="radio"
-              aria-checked={state.metric === m.id}
-              className={state.metric === m.id ? 'on' : ''}
-              onClick={() => setState((s) => ({ ...s, metric: m.id }))}
-            >
-              {m.short}
-            </button>
-          ))}
-        </div>
-
-        <div className="segmented" role="radiogroup" aria-label="Time range">
-          {RANGE_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              role="radio"
-              aria-checked={state.range.preset === p.id}
-              className={state.range.preset === p.id ? 'on' : ''}
-              onClick={() => setState((s) => ({ ...s, range: { preset: p.id } }))}
-            >
-              {p.label}
-            </button>
-          ))}
-          <button
-            role="radio"
-            aria-checked={!!custom}
-            className={custom ? 'on' : ''}
-            onClick={() =>
-              setState((s) => ({
-                ...s,
-                range: { preset: 'custom', from: sgDay(Date.now() - 6 * 86400_000), to: today },
-              }))
-            }
-          >
-            Custom
-          </button>
-        </div>
-
-        {custom && (
-          <div className="dates">
-            <label>
-              From
-              <input
-                type="date"
-                value={custom.from}
-                max={custom.to}
-                onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, from: e.target.value } }))}
-              />
-            </label>
-            <label>
-              To
-              <input
-                type="date"
-                value={custom.to}
-                min={custom.from}
-                max={today}
-                onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, to: e.target.value } }))}
-              />
-            </label>
+        <section className="card chart-card" aria-busy={loading} aria-label="Chart">
+          <div className="chart-top">
+            <h2>{state.metric === 'psi_24h' ? 'PSI, 24-hour' : 'PM2.5, hourly'}</h2>
+            <div className="segmented range" role="radiogroup" aria-label="Time range">
+              {RANGE_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  role="radio"
+                  aria-checked={state.range.preset === p.id}
+                  aria-label={p.label}
+                  className={state.range.preset === p.id ? 'on' : ''}
+                  onClick={() => setState((s) => ({ ...s, range: { preset: p.id } }))}
+                >
+                  {p.id}
+                </button>
+              ))}
+              <button
+                role="radio"
+                aria-checked={!!custom}
+                aria-label="Choose dates"
+                className={custom ? 'on' : ''}
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    range: { preset: 'custom', from: sgDay(Date.now() - 6 * 86400_000), to: today },
+                  }))
+                }
+              >
+                Dates
+              </button>
+            </div>
           </div>
-        )}
-      </section>
 
-      <section className="card chart-card" aria-busy={loading} aria-label="Chart">
-        <div className="chart-head">
-          <div className="chips" role="group" aria-label="Regions (tap to show or hide)">
+          {custom && (
+            <div className="dates">
+              <label>
+                From
+                <input
+                  type="date"
+                  value={custom.from}
+                  max={custom.to}
+                  onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, from: e.target.value } }))}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={custom.to}
+                  min={custom.from}
+                  max={today}
+                  onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, to: e.target.value } }))}
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="regions" role="group" aria-label="Regions (tap to show or hide)">
             {DEVICES.map((d) => {
               const on = state.devices.includes(d.id);
+              const v = status?.regions[state.metric]?.[d.id];
               return (
-                <button key={d.id} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => toggleDevice(d.id)}>
+                <button key={d.id} className={`region ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => toggleDevice(d.id)}>
                   <span className="swatch" style={{ background: dark ? d.color.dark : d.color.light }} aria-hidden />
-                  {d.name}
+                  <span className="region-name">{d.name}</span>
+                  <span className="region-value">{v != null ? fmtValue(v) : '–'}</span>
                 </button>
               );
             })}
             {state.sensor && state.metric === 'pm25_1h' && (
-              <span className="chip on" title="Your own sensor, uncalibrated. Only visible with this link.">
+              <span className="region on" title="Your own sensor, uncalibrated. Only visible with this link.">
                 <span className="swatch dashed" style={{ borderColor: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light }} aria-hidden />
-                My sensor
+                <span className="region-name">My sensor</span>
+                <span className="region-value">raw</span>
               </span>
             )}
           </div>
-          <button className="ghost" onClick={() => setZoom(null)} disabled={!zoom}>
-            Reset zoom
-          </button>
-        </div>
 
-        {!data?.demo && (
-          <div className="panel-bar">
-            <span className="panel-bar-label">Weather below:</span>
-            <div className="chips" role="group" aria-label="Weather panels">
-              {PANEL_ORDER.map((id) => {
-                const view = WEATHER_VIEWS.find((w) => w.id === id)!;
-                const on = state.panels.includes(id);
-                return (
-                  <button key={id} className={`chip small ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => togglePanel(id)}>
-                    {on ? '✓ ' : '+ '}
-                    {view.label}
-                  </button>
-                );
-              })}
+          {error ? (
+            <div className="empty">{error}</div>
+          ) : data && !data.points.length && !loading ? (
+            <div className="empty">No readings for this period yet.</div>
+          ) : (
+            <Meteogram
+              series={chartSeries}
+              metric={metric}
+              panels={panels}
+              weatherColor={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
+              daily={daily}
+              dark={dark}
+              xMin={xMin}
+              xMax={xMax}
+              zoom={zoom}
+              onZoom={onZoom}
+            />
+          )}
+          {loading && <div className="loading" aria-hidden />}
+          {zoom && (
+            <button className="ghost reset-zoom" onClick={() => setZoom(null)}>
+              Show whole period
+            </button>
+          )}
+
+          {!data?.demo && (
+            <div className="panel-bar">
+              <span className="panel-bar-label">Weather:</span>
+              <div className="chips" role="group" aria-label="Weather panels">
+                {PANEL_ORDER.map((id) => {
+                  const view = WEATHER_VIEWS.find((w) => w.id === id)!;
+                  const on = state.panels.includes(id);
+                  return (
+                    <button key={id} className={`chip small ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => togglePanel(id)}>
+                      {on ? '✓ ' : '+ '}
+                      {view.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {state.panels.length > 0 && (
+                <label className="select">
+                  Station
+                  <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
+                    {WEATHER_STATIONS.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name} ({w.region})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
-            {state.panels.length > 0 && (
-              <label className="select">
-                Station
-                <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
-                  {WEATHER_STATIONS.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name} ({w.region})
-                    </option>
-                  ))}
-                </select>
-              </label>
+          )}
+
+          <div className="chart-notes">
+            <p>Tap or hover for values · drag the slider to zoom · tap a region to show or hide it</p>
+            {daily && <p>Long period: values are daily averages.</p>}
+            {weatherError && <p>Weather: {weatherError}</p>}
+            {state.panels.length > 0 && !data?.demo && (
+              <p>
+                Weather from NEA station {weatherStation.name}.{state.panels.includes('wind') && !daily ? ' Arrows show where the wind blows to (up = north).' : ''} A gap
+                means the station sent no data.
+              </p>
             )}
           </div>
-        )}
-
-        {error ? (
-          <div className="empty">{error}</div>
-        ) : data && !data.points.length && !loading ? (
-          <div className="empty">No readings for this period yet.</div>
-        ) : (
-          <Meteogram
-            series={chartSeries}
-            metric={metric}
-            panels={panels}
-            weatherColor={dark ? WEATHER_COLOR.dark : WEATHER_COLOR.light}
-            daily={daily}
-            dark={dark}
-            xMin={xMin}
-            xMax={xMax}
-            zoom={zoom}
-            onZoom={onZoom}
-          />
-        )}
-        {loading && <div className="loading" aria-hidden />}
-        <div className="chart-notes">
-          <p>Drag across any panel to zoom in · scroll to zoom · move the slider · tap a region to show or hide it</p>
-          {daily && <p>Long period: values are daily averages.</p>}
-          {weatherError && <p>Weather: {weatherError}</p>}
-          {state.panels.length > 0 && !data?.demo && (
-            <p>
-              Weather from NEA station {weatherStation.name}.{state.panels.includes('wind') && !daily ? ' Arrows show where the wind blows to (up = north).' : ''} A gap
-              means the station sent no data.
-            </p>
-          )}
-        </div>
-      </section>
+        </section>
+      </div>
 
       <section className="summary" aria-label="Summary of this period">
         <h2 className="summary-title">
-          Summary <span>{windowLabel}</span>
+          This period <span>{windowLabel}</span>
         </h2>
         <div className="tiles tiles-3">
           <Tile label="Peak" value={stats?.peak?.value} unit={metric.unit} sub={stats?.peak ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
-          <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="All selected regions" />
+          <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="Selected regions" />
           <Tile
-            label={daily ? `Days averaging above ${metric.alertFrom}` : metric.alertLabel}
+            label={daily ? `Days above ${metric.alertFrom}` : metric.alertLabel}
             value={stats?.above}
             unit={daily ? 'days' : 'hours'}
-            sub={`Above ${metric.alertFrom} in any selected region`}
+            sub={`Above ${metric.alertFrom}, any region`}
           />
         </div>
       </section>
@@ -749,8 +746,8 @@ export default function Dashboard() {
       </section>
 
       <section className="card about">
-        <h2>Reading the chart</h2>
-        <p>{metric.explainer}</p>
+        <h2>About this page</h2>
+        <p>Official readings from the National Environment Agency for all five regions, with the weather that explains them. {metric.explainer}</p>
         <ul className="bands">
           {metric.bands.map((b) => (
             <li key={b.label}>
@@ -804,6 +801,42 @@ export default function Dashboard() {
         </p>
       </footer>
     </main>
+  );
+}
+
+function NowTile({
+  kicker,
+  value,
+  unit,
+  band,
+  sub,
+  selected,
+  onSelect,
+}: {
+  kicker: string;
+  value?: number;
+  unit?: string;
+  band?: { label: string; accent: string };
+  sub: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      className={`now-tile ${selected ? 'on' : ''}`}
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      style={{ ['--band' as string]: band?.accent ?? 'var(--ring)' }}
+    >
+      <span className="now-kicker">{kicker}</span>
+      <span className="now-value">
+        {value != null ? fmtValue(value) : '–'}
+        {value != null && unit && <span className="now-unit"> {unit}</span>}
+      </span>
+      {band && <span className="badge" style={{ background: band.accent }}>{band.label}</span>}
+      <span className="now-sub">{sub}</span>
+    </button>
   );
 }
 
