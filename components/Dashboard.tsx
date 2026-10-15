@@ -327,29 +327,41 @@ export default function Dashboard() {
     });
   }, [data, weatherData, state.panels, state.station, step]);
 
+  // The "now" boxes describe one region: the only selected one, otherwise Central (the school's region).
+  const focusId = state.devices.length === 1 ? state.devices[0] : state.devices.includes('nea-central') ? 'nea-central' : state.devices[0];
+  const focusName = DEVICES.find((d) => d.id === focusId)?.name ?? focusId;
+
   const status = useMemo(() => {
     if (!now?.pm.length) return null;
-    const latestOf = (pts: Point[]) => {
-      const t = Math.max(...pts.map((p) => Date.parse(p.t)));
-      const top = pts.filter((p) => Date.parse(p.t) === t).sort((a, b) => b.v - a.v)[0];
-      return { t, v: top.v, where: DEVICES.find((d) => d.id === top.device)?.name ?? top.device };
-    };
     const band = (bands: { from: number; to: number; label: string; accent: string }[], v: number) =>
       bands.find((b) => v >= b.from && v < b.to) ?? bands[bands.length - 1];
-    const pm = latestOf(now.pm);
-    const psi = now.psi.length ? latestOf(now.psi) : null;
-    // Latest value per region, for the region boxes above the chart.
-    const perRegion = (pts: Point[]) => {
-      if (!pts.length) return {} as Record<string, number>;
+    const name = (id: string) => DEVICES.find((d) => d.id === id)?.name ?? id;
+    const summarise = (pts: Point[], bands: { from: number; to: number; label: string; accent: string }[]) => {
+      if (!pts.length) return null;
       const t = Math.max(...pts.map((p) => Date.parse(p.t)));
-      return Object.fromEntries(pts.filter((p) => Date.parse(p.t) === t).map((p) => [p.device, p.v])) as Record<string, number>;
+      const atT = pts.filter((p) => Date.parse(p.t) === t);
+      const top = [...atT].sort((x, y) => y.v - x.v)[0];
+      const mine = atT.find((p) => p.device === focusId);
+      const before = pts.find((p) => p.device === focusId && Date.parse(p.t) === t - 3600_000);
+      const v = mine?.v ?? top.v;
+      return {
+        t,
+        v,
+        band: band(bands, v),
+        where: mine ? name(focusId) : name(top.device),
+        change: mine && before ? Math.round((mine.v - before.v) * 10) / 10 : null,
+        highest: { v: top.v, where: name(top.device) },
+        perRegion: Object.fromEntries(atT.map((p) => [p.device, p.v])) as Record<string, number>,
+      };
     };
+    const pm = summarise(now.pm, METRICS.pm25_1h.bands)!;
+    const psi = summarise(now.psi, METRICS.psi_24h.bands);
     return {
-      pm: { ...pm, band: band(METRICS.pm25_1h.bands, pm.v) },
-      psi: psi ? { ...psi, band: band(METRICS.psi_24h.bands, psi.v) } : null,
-      regions: { pm25_1h: perRegion(now.pm), psi_24h: perRegion(now.psi) } as Record<MetricId, Record<string, number>>,
+      pm,
+      psi,
+      regions: { pm25_1h: pm.perRegion, psi_24h: psi?.perRegion ?? {} } as Record<MetricId, Record<string, number>>,
     };
-  }, [now]);
+  }, [now, focusId]);
 
   function togglePanel(id: WeatherView) {
     setState((s) => ({
@@ -369,9 +381,11 @@ export default function Dashboard() {
     let peak = pts[0];
     let sum = 0;
     const above = new Set<string>();
+    const slots = new Set<string>();
     for (const p of pts) {
       if (p.v > peak.v) peak = p;
       sum += p.v;
+      slots.add(p.t);
       if (p.v > metric.alertFrom) above.add(p.t);
     }
     return {
@@ -379,6 +393,7 @@ export default function Dashboard() {
       peak: peak ? { value: peak.v, where: name(peak.device), when: fmtDateTime(peak.t, daily) } : null,
       mean: pts.length ? sum / pts.length : null,
       above: above.size,
+      slots: slots.size,
     };
   }, [neaPoints, metric, daily, zoom]);
 
@@ -481,6 +496,7 @@ export default function Dashboard() {
 
   const today = sgDay(Date.now());
   const custom = state.range.preset === 'custom' ? state.range : null;
+  const periodLabel = zoom ? 'zoomed' : custom ? `${custom.from.slice(5).replace('-', '.')}–${custom.to.slice(5).replace('-', '.')}` : `last ${RANGE_PRESETS.find((p) => p.id === state.range.preset)?.label ?? ''}`;
 
   return (
     <main className="page">
@@ -499,14 +515,15 @@ export default function Dashboard() {
       )}
 
       <div className="glance">
-        <section className="now" aria-label="Right now">
-          <div className="now-tiles" role="radiogroup" aria-label="Shown in the chart">
+        <section className="now" aria-label="At a glance">
+          <div className="now-tiles">
             <NowTile
-              kicker="PM2.5 · last hour"
+              kicker="PM2.5 · now"
               value={status?.pm.v}
               unit="µg/m³"
               band={status?.pm.band}
-              sub={status ? `Highest region: ${status.pm.where}` : 'Loading…'}
+              change={status?.pm.change}
+              sub={status ? subFor(status.pm, focusName) : 'Loading…'}
               selected={state.metric === 'pm25_1h'}
               onSelect={() => setState((s) => ({ ...s, metric: 'pm25_1h' }))}
             />
@@ -514,9 +531,30 @@ export default function Dashboard() {
               kicker="PSI · 24 hours"
               value={status?.psi?.v}
               band={status?.psi?.band}
-              sub={status?.psi ? `Highest region: ${status.psi.where}` : status ? 'No reading' : 'Loading…'}
+              change={status?.psi?.change}
+              sub={status?.psi ? subFor(status.psi, focusName) : status ? 'No reading' : 'Loading…'}
               selected={state.metric === 'psi_24h'}
               onSelect={() => setState((s) => ({ ...s, metric: 'psi_24h' }))}
+            />
+            <PeriodTile
+              kicker={`Peak · ${periodLabel}`}
+              value={stats?.peak?.value}
+              unit={metric.unit}
+              band={stats?.peak ? metric.bands.find((x) => stats.peak!.value >= x.from && stats.peak!.value < x.to) : undefined}
+              lines={stats?.peak ? [(selectedDevices.length > 1 ? `${stats.peak.where} · ` : '') + stats.peak.when.replace(/^[A-Za-z]{3}, /, '')] : []}
+            />
+            <PeriodTile
+              kicker={`Average · ${periodLabel}`}
+              value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined}
+              unit={metric.unit}
+              lines={
+                stats
+                  ? [
+                      `Above ${metric.alertFrom}: ${stats.above} of ${stats.slots} ${daily ? 'days' : 'h'}`,
+                      ...(selectedDevices.length > 1 ? [`${selectedDevices.length} regions together`] : []),
+                    ]
+                  : []
+              }
             />
           </div>
           {status?.psi && (
@@ -676,21 +714,6 @@ export default function Dashboard() {
         </section>
       </div>
 
-      <section className="summary" aria-label="Summary of this period">
-        <h2 className="summary-title">
-          This period <span>{windowLabel}</span>
-        </h2>
-        <div className="tiles tiles-3">
-          <Tile label="Peak" value={stats?.peak?.value} unit={metric.unit} sub={stats?.peak ? `${stats.peak.where} · ${stats.peak.when}` : ''} metricBands={metric.bands} />
-          <Tile label="Average" value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined} unit={metric.unit} sub="Selected regions" />
-          <Tile
-            label={daily ? `Days above ${metric.alertFrom}` : metric.alertLabel}
-            value={stats?.above}
-            unit={daily ? 'days' : 'hours'}
-            sub={`Above ${metric.alertFrom}, any region`}
-          />
-        </div>
-      </section>
 
       {state.sensor && (
         <section className="card chart-card" aria-label="My sensor calibration">
@@ -812,15 +835,18 @@ function NowTile({
   sub,
   selected,
   onSelect,
+  change,
 }: {
   kicker: string;
   value?: number;
   unit?: string;
   band?: { label: string; accent: string };
+  change?: number | null;
   sub: string;
   selected: boolean;
   onSelect: () => void;
 }) {
+  const trend = change == null ? null : change > 0 ? `↑ +${fmtValue(change)}` : change < 0 ? `↓ −${fmtValue(-change)}` : '→ 0';
   return (
     <button
       className={`now-tile ${selected ? 'on' : ''}`}
@@ -834,10 +860,52 @@ function NowTile({
         {value != null ? fmtValue(value) : '–'}
         {value != null && unit && <span className="now-unit"> {unit}</span>}
       </span>
-      {band && <span className="badge" style={{ background: band.accent }}>{band.label}</span>}
+      <span className="now-line">
+        {band && <span className="badge" style={{ background: band.accent }}>{band.label}</span>}
+        {trend && (
+          <span className="trend" title="Change since the hour before">
+            {trend}
+          </span>
+        )}
+      </span>
       <span className="now-sub">{sub}</span>
     </button>
   );
+}
+
+function PeriodTile({
+  kicker,
+  value,
+  unit,
+  band,
+  lines,
+}: {
+  kicker: string;
+  value?: number;
+  unit?: string;
+  band?: { label: string; accent: string };
+  lines: string[];
+}) {
+  return (
+    <div className="now-tile period" style={{ ['--band' as string]: band?.accent ?? 'var(--ring)' }}>
+      <span className="now-kicker">{kicker}</span>
+      <span className="now-value">
+        {value != null ? fmtValue(value) : '–'}
+        {value != null && unit && <span className="now-unit"> {unit}</span>}
+      </span>
+      {lines.map((l, i) => (
+        <span key={l} className="now-sub">
+          {i === 0 && band && <span className="tag">{band.label}</span>}
+          {l}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** "Central" or "Central · highest: East 160" when another region is higher. */
+function subFor(x: { where: string; highest: { v: number; where: string } }, focus: string) {
+  return x.where === x.highest.where ? `${x.where} (highest region)` : `${focus} · highest: ${x.highest.where} ${fmtValue(x.highest.v)}`;
 }
 
 function Tile({

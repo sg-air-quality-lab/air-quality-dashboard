@@ -984,3 +984,59 @@ th {
     margin-top: 2px;
   }
 }
+
+/* ---------- four boxes: now (PM2.5, PSI) and the chosen period (peak, average) */
+
+.now-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.now-tile.period {
+  cursor: default;
+}
+
+
+@media (min-width: 900px) {
+  .now-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Computers: boxes in one row above the chart instead of a side column */
+@media (min-width: 1024px) {
+  .glance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .now {
+    position: static;
+  }
+
+  .now-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .now-value {
+    font-size: 38px;
+  }
+}
+
+@media (max-width: 560px) {
+  .now-tile.period .now-value {
+    font-size: 24px;
+  }
+
+  .now-tile.period .now-kicker {
+    font-size: 11.5px;
+  }
+}
