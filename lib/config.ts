@@ -71,8 +71,8 @@ export interface DeviceConfig {
 // Region colours avoid the air-quality colours (green, yellow, orange, red), so a line's colour
 // never looks like a band. Central, the school's region, is neutral ink.
 export const DEVICES: DeviceConfig[] = [
-  { id: 'nea-west', name: 'West', color: { light: '#2563eb', dark: '#60a5fa' } },
   { id: 'nea-central', name: 'Central', color: { light: '#1f1f1d', dark: '#f2f1ec' } },
+  { id: 'nea-west', name: 'West', color: { light: '#2563eb', dark: '#60a5fa' } },
   { id: 'nea-east', name: 'East', color: { light: '#7c3aed', dark: '#a78bfa' } },
   { id: 'nea-north', name: 'North', color: { light: '#0891b2', dark: '#22d3ee' } },
   { id: 'nea-south', name: 'South', color: { light: '#c026d3', dark: '#e879f9' } },
