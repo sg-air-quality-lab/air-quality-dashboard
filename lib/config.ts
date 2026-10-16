@@ -7,11 +7,25 @@ export interface Band {
   from: number;
   to: number;
   label: string;
-  /** Background tint for the chart. Status colours, never series colours. */
+  /** Background tint for the chart (legacy; the chart now derives tints from `accent`). */
   tint: string | null;
-  /** Solid status colour for badges and the "right now" card. */
+  /** The band's colour: badges, box edges, dots, the chart line and its background. */
   accent: string;
+  /** Text colour on top of `accent` (dark on yellow, white otherwise). */
+  onAccent?: string;
+  /** Where the band comes from, shown in the explanations. */
+  source?: string;
 }
+
+// One colour language for air quality everywhere: green, yellow, orange, red, wine.
+// Region colours (below) never use these hues.
+export const AQ = {
+  green: '#2e9e5b',
+  yellow: '#e2b20c',
+  orange: '#ea7a1e',
+  red: '#d83a3a',
+  wine: '#a3204f',
+};
 
 export interface MetricConfig {
   id: MetricId;
@@ -34,13 +48,14 @@ export const METRICS: Record<MetricId, MetricConfig> = {
     alertFrom: 55,
     alertLabel: 'Hours Elevated or worse',
     bands: [
-      { from: 0, to: 55, label: 'Normal', tint: null, accent: '#3a9a5b' },
-      { from: 55, to: 150, label: 'Elevated', tint: 'rgba(250, 178, 25, 0.10)', accent: '#d99a00' },
-      { from: 150, to: 250, label: 'High', tint: 'rgba(236, 131, 90, 0.14)', accent: '#e0703f' },
-      { from: 250, to: 500, label: 'Very high', tint: 'rgba(208, 59, 59, 0.14)', accent: '#c93a3a' },
+      { from: 0, to: 15, label: 'Good', tint: null, accent: AQ.green, source: 'Within the WHO guideline (15 µg/m³ as a daily average)' },
+      { from: 15, to: 55, label: 'Normal', tint: null, accent: AQ.yellow, onAccent: '#1f1f1d', source: 'NEA “Normal”, but above the WHO guideline' },
+      { from: 55, to: 150, label: 'Elevated', tint: null, accent: AQ.orange, source: 'NEA band II' },
+      { from: 150, to: 250, label: 'High', tint: null, accent: AQ.red, source: 'NEA band III' },
+      { from: 250, to: 500, label: 'Very high', tint: null, accent: AQ.wine, source: 'NEA band IV' },
     ],
     explainer:
-      'Hourly average of fine particles (≤ 2.5 µm) for each region. NEA uses this as the best guide for activities over the next few hours.',
+      'Hourly average of fine particles (≤ 2.5 µm) for each region. NEA uses this as the best guide for activities over the next few hours. Green means within the WHO guideline of 15 µg/m³; the other bands follow NEA.',
   },
   psi_24h: {
     id: 'psi_24h',
@@ -50,11 +65,11 @@ export const METRICS: Record<MetricId, MetricConfig> = {
     alertFrom: 100,
     alertLabel: 'Hours Unhealthy or worse',
     bands: [
-      { from: 0, to: 50, label: 'Good', tint: null, accent: '#3a9a5b' },
-      { from: 50, to: 100, label: 'Moderate', tint: 'rgba(250, 178, 25, 0.07)', accent: '#d99a00' },
-      { from: 100, to: 200, label: 'Unhealthy', tint: 'rgba(236, 131, 90, 0.14)', accent: '#e0703f' },
-      { from: 200, to: 300, label: 'Very unhealthy', tint: 'rgba(208, 59, 59, 0.14)', accent: '#c93a3a' },
-      { from: 300, to: 500, label: 'Hazardous', tint: 'rgba(208, 59, 59, 0.26)', accent: '#8e1f3f' },
+      { from: 0, to: 50, label: 'Good', tint: null, accent: AQ.green },
+      { from: 50, to: 100, label: 'Moderate', tint: null, accent: AQ.yellow, onAccent: '#1f1f1d' },
+      { from: 100, to: 200, label: 'Unhealthy', tint: null, accent: AQ.orange },
+      { from: 200, to: 300, label: 'Very unhealthy', tint: null, accent: AQ.red },
+      { from: 300, to: 500, label: 'Hazardous', tint: null, accent: AQ.wine },
     ],
     explainer:
       'Pollutant Standards Index over the past 24 hours. It reacts slowly, so it lags behind sudden changes in haze.',

@@ -130,16 +130,46 @@ export default function Meteogram(props: Props) {
     // Stop at the next band edge, unless that edge is far above the data (e.g. 500 when the peak is 265).
     const edge = edges.find((e) => e >= dataMax * 1.05);
     const yMax = edge != null && edge <= Math.max(dataMax * 1.6, dataMax + 60) ? edge : Math.ceil((dataMax * 1.15) / 50) * 50 || 50;
+    // Band tints come from the same colours as the tiles, strong enough to read in dark mode too.
+    const alpha = dark ? 0.2 : 0.14;
+    // Outline in the card colour keeps chart labels readable where a line crosses them.
+    const halo = dark ? '#1a1a19' : '#fcfcfb';
     const bandAreas = metric.bands
       .filter((b) => b.from < yMax)
-      .map((b) => [
-        {
-          yAxis: b.from,
-          itemStyle: { color: b.tint ?? 'rgba(0,0,0,0)' },
-          label: { show: wide, position: 'right', distance: 8, color: ink.muted, fontSize: 11, formatter: b.label },
-        },
-        { yAxis: Math.min(b.to, yMax) },
-      ]);
+      .map((b) => {
+        const top = Math.min(b.to, yMax);
+        // On phones the name sits inside the chart, only where the band is tall enough to hold it.
+        const px = ((top - b.from) / yMax) * mainH;
+        return [
+          {
+            yAxis: b.from,
+            itemStyle: { color: tint(b.accent, alpha) },
+            label: wide
+              ? { show: true, position: 'right', distance: 8, color: ink.muted, fontSize: 11, formatter: b.label }
+              : { show: px >= 16, position: 'insideRight', distance: 6, color: ink.muted, fontSize: 10, formatter: b.label, textBorderColor: halo, textBorderWidth: 2 },
+          },
+          { yAxis: top },
+        ];
+      });
+    // WHO daily guideline as a dashed reference line on the PM2.5 chart.
+    const whoLine =
+      metric.id === 'pm25_1h' && yMax > 15
+        ? {
+            silent: true,
+            symbol: 'none',
+            lineStyle: { color: ink.muted, type: 'dashed', width: 1 },
+            // Below the line inside the green band when it is tall enough, so it does not sit on the data.
+            label: {
+              position: (15 / yMax) * mainH >= 16 ? 'insideStartBottom' : 'insideStartTop',
+              formatter: 'WHO 15',
+              color: ink.muted,
+              fontSize: 10,
+              textBorderColor: halo,
+              textBorderWidth: 2,
+            },
+            data: [{ yAxis: 15 }],
+          }
+        : undefined;
 
     const n = panels.length + 1;
     const all = Array.from({ length: n }, (_, i) => i);
@@ -372,6 +402,7 @@ export default function Meteogram(props: Props) {
           itemStyle: s.bandColored ? {} : { color: s.color },
           z: s.muted ? 2 : 3,
           markArea: i === 0 ? { silent: true, data: bandAreas as never } : undefined,
+          markLine: i === 0 ? (whoLine as never) : undefined,
         })),
         ...panelSeries,
       ],
@@ -392,4 +423,10 @@ export default function Meteogram(props: Props) {
       aria-label={`${props.metric.label}${props.panels.length ? ' with ' + props.panels.map((p) => p.name.toLowerCase()).join(', ') : ''}`}
     />
   );
+}
+
+/** A see-through version of a #rrggbb colour. */
+function tint(hex: string, alpha: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }

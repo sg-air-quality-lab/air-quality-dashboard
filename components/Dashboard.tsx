@@ -17,6 +17,7 @@ import {
   CITIZEN_ID,
   compass,
   MY_SENSOR_COLOR,
+  type Band,
   type MetricId,
   type RangePresetId,
   type WeatherView,
@@ -364,10 +365,10 @@ export default function Dashboard() {
 
   const status = useMemo(() => {
     if (!now?.pm.length) return null;
-    const band = (bands: { from: number; to: number; label: string; accent: string }[], v: number) =>
+    const band = (bands: Band[], v: number) =>
       bands.find((b) => v >= b.from && v < b.to) ?? bands[bands.length - 1];
     const name = (id: string) => DEVICES.find((d) => d.id === id)?.name ?? id;
-    const summarise = (pts: Point[], bands: { from: number; to: number; label: string; accent: string }[]) => {
+    const summarise = (pts: Point[], bands: Band[]) => {
       if (!pts.length) return null;
       const t = Math.max(...pts.map((p) => Date.parse(p.t)));
       const atT = pts.filter((p) => Date.parse(p.t) === t);
@@ -789,8 +790,9 @@ export default function Dashboard() {
         <ul className="bands">
           {metric.bands.map((b) => (
             <li key={b.label}>
-              <span className="band-swatch" style={{ background: b.tint ?? 'transparent' }} aria-hidden />
+              <span className="band-swatch" style={{ background: b.accent }} aria-hidden />
               <b>{b.label}</b> {b.to === 500 ? `above ${b.from}` : `${b.from}–${b.to}`}
+              {b.source && <span className="muted"> · {b.source}</span>}
             </li>
           ))}
         </ul>
@@ -856,7 +858,7 @@ function NowTile({
   kicker: string;
   value?: number;
   unit?: string;
-  band?: { label: string; accent: string };
+  band?: { label: string; accent: string; onAccent?: string };
   change?: number | null;
   sub: string;
   selected: boolean;
@@ -877,7 +879,11 @@ function NowTile({
         {value != null && unit && <span className="now-unit"> {unit}</span>}
       </span>
       <span className="now-line">
-        {band && <span className="badge" style={{ background: band.accent }}>{band.label}</span>}
+        {band && (
+          <span className="badge" style={{ background: band.accent, color: band.onAccent ?? '#fff' }}>
+            {band.label}
+          </span>
+        )}
         {trend && (
           <span className="trend" title="Change since the hour before">
             {trend}
