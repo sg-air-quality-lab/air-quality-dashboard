@@ -76,9 +76,14 @@ function withGaps(points: Point[], device: string, step: number): [number, numbe
   return out;
 }
 
+// The app always opens in its clean default view (Central, 3 days, no weather), even from an old
+// bookmark or home-screen icon. Only links made with "Copy link to this view" (marked view=1)
+// open a specific view. The private ?sensor= link is always honoured.
 function readUrl(): State {
   if (typeof window === 'undefined') return DEFAULT_STATE;
   const q = new URLSearchParams(window.location.search);
+  const sensorOnly = CITIZEN_ID.test(q.get('sensor') ?? '') ? q.get('sensor') : null;
+  if (q.get('view') !== '1') return { ...DEFAULT_STATE, sensor: sensorOnly };
   const metric = (q.get('metric') as MetricId) in METRICS ? (q.get('metric') as MetricId) : DEFAULT_STATE.metric;
   const regions = (q.get('regions') ?? '')
     .split(',')
@@ -98,8 +103,10 @@ function readUrl(): State {
   return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, panels, station, sensor };
 }
 
-function writeUrl(s: State) {
+/** A link that opens exactly this view. */
+function shareUrl(s: State) {
   const q = new URLSearchParams();
+  q.set('view', '1');
   q.set('metric', s.metric);
   q.set('regions', s.devices.map((d) => d.replace('nea-', '')).join(','));
   if (s.range.preset === 'custom') {
@@ -109,7 +116,13 @@ function writeUrl(s: State) {
   q.set('panels', s.panels.join(',') || 'none');
   q.set('station', s.station.replace('nea-ws-', ''));
   if (s.sensor) q.set('sensor', s.sensor);
-  window.history.replaceState(null, '', `?${q.toString()}`);
+  return `${window.location.origin}${window.location.pathname}?${q.toString()}`;
+}
+
+/** Keep the address bar clean, so bookmarks and home-screen icons open the default view. */
+function cleanAddressBar(sensor: string | null) {
+  const clean = sensor ? `?sensor=${sensor}` : window.location.pathname;
+  if (window.location.search !== (sensor ? `?sensor=${sensor}` : '')) window.history.replaceState(null, '', clean);
 }
 
 function rangeToQuery(r: Range): string {
@@ -152,13 +165,11 @@ export default function Dashboard() {
   const dark = useDarkMode();
 
   useEffect(() => {
-    setState(readUrl());
+    const initial = readUrl();
+    setState(initial);
     setReady(true);
+    cleanAddressBar(initial.sensor);
   }, []);
-
-  useEffect(() => {
-    if (ready) writeUrl(state);
-  }, [state, ready]);
 
   // A new period starts unzoomed.
   useEffect(() => setZoom(null), [state.range]);
@@ -459,7 +470,7 @@ export default function Dashboard() {
       ['Period', windowLabel],
       ['Times', daily ? 'Singapore time, daily averages' : 'Singapore time, hourly values. Empty cells: no reading.'],
       ['Created', fmtIsoLocal(Date.now())],
-      ['Link to this view', window.location.href],
+      ['Link to this view', shareUrl(state)],
       [],
       ['Source', 'Contains information from the National Environment Agency (NEA), accessed via data.gov.sg, licensed under the Singapore Open Data Licence.'],
     ];
@@ -468,7 +479,7 @@ export default function Dashboard() {
       { name: 'Info', rows: info, widths: [20, 100] },
     ]);
     saveFile(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'xlsx');
-  }, [exportTable, metric, selectedDevices, weatherStation, windowLabel, daily]);
+  }, [exportTable, metric, selectedDevices, weatherStation, windowLabel, daily, state]);
 
   const downloadCsv = useCallback(() => {
     // The byte-order mark tells Excel the file is UTF-8, so µg/m³ and °C show correctly.
@@ -478,13 +489,13 @@ export default function Dashboard() {
 
   const copyLink = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(shareUrl(state));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       /* clipboard not available */
     }
-  }, []);
+  }, [state]);
 
   function toggleDevice(id: string) {
     setState((s) => {
@@ -557,14 +568,6 @@ export default function Dashboard() {
               }
             />
           </div>
-          {status?.psi && (
-            <p className="advice">
-              <b>NEA advice:</b> {PSI_ADVICE[status.psi.band.label]}{' '}
-              <a href="https://www.haze.gov.sg" target="_blank" rel="noreferrer">
-                More
-              </a>
-            </p>
-          )}
         </section>
 
         <section className="card chart-card" aria-busy={loading} aria-label="Chart">
@@ -770,6 +773,14 @@ export default function Dashboard() {
 
       <section className="card about">
         <h2>About this page</h2>
+          {status?.psi && (
+          <p className="advice">
+            <b>NEA advice:</b> {PSI_ADVICE[status.psi.band.label]}{' '}
+            <a href="https://www.haze.gov.sg" target="_blank" rel="noreferrer">
+              More
+            </a>
+          </p>
+        )}
         <p>Official readings from the National Environment Agency for all five regions, with the weather that explains them. {metric.explainer}</p>
         <ul className="bands">
           {metric.bands.map((b) => (
