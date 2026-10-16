@@ -44,6 +44,11 @@ type Range = { preset: RangePresetId } | { preset: 'custom'; from: string; to: s
 
 interface State {
   metric: MetricId;
+  /** The one region the boxes and the main line describe. */
+  focus: string;
+  /** Show the other regions as thin grey lines. */
+  compare: boolean;
+  /** Derived: focus only, or all regions when comparing. */
   devices: string[];
   range: Range;
   /** Weather panels under the main chart, in PANEL_ORDER. */
@@ -55,7 +60,9 @@ interface State {
 
 const DEFAULT_STATE: State = {
   metric: 'pm25_1h',
-  devices: ['nea-central'], // the school's region; tap others to compare
+  focus: 'nea-central', // the school's region
+  compare: false,
+  devices: ['nea-central'],
   range: { preset: '3d' },
   panels: DEFAULT_PANELS,
   station: 'nea-ws-S50',
@@ -100,7 +107,9 @@ function readUrl(): State {
   const panels = rawPanels ? PANEL_ORDER.filter((id) => rawPanels.includes(id)) : DEFAULT_STATE.panels;
   const station = WEATHER_STATIONS.some((w) => w.id === `nea-ws-${q.get('station')}`) ? `nea-ws-${q.get('station')}` : DEFAULT_STATE.station;
   const sensor = CITIZEN_ID.test(q.get('sensor') ?? '') ? q.get('sensor') : null;
-  return { metric, devices: regions.length ? regions : DEFAULT_STATE.devices, range, panels, station, sensor };
+  const focus = regions[0] ?? DEFAULT_STATE.focus;
+  const compare = q.get('compare') === '1';
+  return { metric, focus, compare, devices: compare ? DEVICES.map((d) => d.id) : [focus], range, panels, station, sensor };
 }
 
 /** A link that opens exactly this view. */
@@ -108,7 +117,8 @@ function shareUrl(s: State) {
   const q = new URLSearchParams();
   q.set('view', '1');
   q.set('metric', s.metric);
-  q.set('regions', s.devices.map((d) => d.replace('nea-', '')).join(','));
+  q.set('regions', s.focus.replace('nea-', ''));
+  if (s.compare) q.set('compare', '1');
   if (s.range.preset === 'custom') {
     q.set('from', s.range.from);
     q.set('to', s.range.to);
@@ -156,6 +166,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<Zoom>(null);
+  // Bumped by the reload button and every 10 minutes: reloads the boxes and the chart.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setRefreshKey((k) => k + 1), 10 * 60_000);
+    return () => clearInterval(id);
+  }, []);
   const onZoom = useCallback((z: Zoom) => setZoom((prev) => (sameZoom(prev, z) ? prev : z)), []);
   const [copied, setCopied] = useState(false);
   const [weatherData, setWeatherData] = useState<{ byMetric: Record<string, Point[]>; key: string } | null>(null);
@@ -194,7 +210,7 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.metric, state.devices, state.range, state.sensor, ready]);
+  }, [state.metric, state.devices, state.range, state.sensor, ready, refreshKey]);
 
   // Weather panels for exactly the same time window as the main chart.
   useEffect(() => {
@@ -233,9 +249,7 @@ export default function Dashboard() {
         .catch(() => setNow(null));
     };
     load();
-    const id = setInterval(load, 10 * 60_000);
-    return () => clearInterval(id);
-  }, []);
+  }, [refreshKey]);
 
   // Calibration: always the last 14 days, own sensor vs the mean of NEA West and Central.
   useEffect(() => {
@@ -298,11 +312,15 @@ export default function Dashboard() {
 
   const chartSeries: ChartSeries[] = useMemo(() => {
     if (!data) return [];
-    const series: ChartSeries[] = DEVICES.filter((d) => state.devices.includes(d.id)).map((d) => ({
+    // Focus region last, so its line is drawn on top.
+    const ordered = [...DEVICES.filter((d) => state.devices.includes(d.id) && d.id !== state.focus), ...DEVICES.filter((d) => d.id === state.focus)];
+    const series: ChartSeries[] = ordered.map((d) => ({
       id: d.id,
       name: d.name,
-      color: dark ? d.color.dark : d.color.light,
+      color: d.id === state.focus ? (dark ? '#f2f1ec' : '#1f1f1d') : dark ? '#6b6a65' : '#b4b2aa',
       data: withGaps(data.points, d.id, step),
+      bandColored: d.id === state.focus,
+      muted: d.id !== state.focus,
     }));
     if (state.sensor && data.points.some((p) => p.device === state.sensor)) {
       series.push({
@@ -314,7 +332,7 @@ export default function Dashboard() {
       });
     }
     return series;
-  }, [data, state.devices, state.sensor, dark, step]);
+  }, [data, state.devices, state.focus, state.sensor, dark, step]);
 
   // Only the official NEA values count for the summary, table and CSV.
   const neaPoints = useMemo(() => (data?.points ?? []).filter((p) => p.device.startsWith('nea-')), [data]);
@@ -339,7 +357,7 @@ export default function Dashboard() {
   }, [data, weatherData, state.panels, state.station, step]);
 
   // The "now" boxes describe one region: the only selected one, otherwise Central (the school's region).
-  const focusId = state.devices.length === 1 ? state.devices[0] : state.devices.includes('nea-central') ? 'nea-central' : state.devices[0];
+  const focusId = state.focus;
   const focusName = DEVICES.find((d) => d.id === focusId)?.name ?? focusId;
 
   const status = useMemo(() => {
@@ -382,13 +400,15 @@ export default function Dashboard() {
   }
 
   const stats = useMemo(() => {
-    if (!neaPoints.length) return null;
+    const neaPointsAll = neaPoints;
+    const neaPointsFocus = neaPointsAll.filter((p) => p.device === focusId);
+    if (!neaPointsFocus.length) return null;
     const name = (id: string) => DEVICES.find((d) => d.id === id)?.name ?? id;
     // "Latest" always means now; the other numbers follow the zoomed window.
     let latestT = 0;
-    for (const p of neaPoints) latestT = Math.max(latestT, Date.parse(p.t));
-    const latest = neaPoints.filter((p) => Date.parse(p.t) === latestT).sort((a, b) => b.v - a.v)[0];
-    const pts = zoom ? neaPoints.filter((p) => Date.parse(p.t) >= zoom.from && Date.parse(p.t) <= zoom.to) : neaPoints;
+    for (const p of neaPointsFocus) latestT = Math.max(latestT, Date.parse(p.t));
+    const latest = neaPointsFocus.filter((p) => Date.parse(p.t) === latestT)[0];
+    const pts = zoom ? neaPointsFocus.filter((p) => Date.parse(p.t) >= zoom.from && Date.parse(p.t) <= zoom.to) : neaPointsFocus;
     let peak = pts[0];
     let sum = 0;
     const above = new Set<string>();
@@ -406,7 +426,7 @@ export default function Dashboard() {
       above: above.size,
       slots: slots.size,
     };
-  }, [neaPoints, metric, daily, zoom]);
+  }, [neaPoints, focusId, metric, daily, zoom]);
 
   const hour = (t: number) => Math.round(t / 3600_000) * 3600_000;
   const windowLabel = zoom
@@ -497,13 +517,9 @@ export default function Dashboard() {
     }
   }, [state]);
 
-  function toggleDevice(id: string) {
-    setState((s) => {
-      const has = s.devices.includes(id);
-      if (has && s.devices.length === 1) return s; // keep at least one region
-      return { ...s, devices: has ? s.devices.filter((d) => d !== id) : [...s.devices, id] };
-    });
-  }
+  const allIds = DEVICES.map((d) => d.id);
+  const setFocus = (id: string) => setState((s) => ({ ...s, focus: id, devices: s.compare ? allIds : [id] }));
+  const setCompare = (on: boolean) => setState((s) => ({ ...s, compare: on, devices: on ? allIds : [s.focus] }));
 
   const today = sgDay(Date.now());
   const custom = state.range.preset === 'custom' ? state.range : null;
@@ -512,142 +528,73 @@ export default function Dashboard() {
   return (
     <main className="page">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Air Quality Lab · Singapore</p>
-          <h1>How is the air today?</h1>
-        </div>
-        {status && <p className="updated">Updated {fmtTime(status.pm.t)}</p>}
+        <h1>How is the air today?</h1>
+        <button className="updated" onClick={() => setRefreshKey((k) => k + 1)} title="Reload the latest readings">
+          {status ? fmtTime(status.pm.t) : '…'} <span aria-hidden>↻</span>
+        </button>
       </header>
 
       {data?.demo && (
         <div className="notice" role="status">
-          Demo mode: showing a small sample of real NEA readings (West and Central, 7–9 Oct 2026). The live database is not connected yet.
+          Demo mode: showing a small sample of real NEA readings. The live database is not connected yet.
         </div>
       )}
 
-      <div className="glance">
-        <section className="now" aria-label="At a glance">
-          <div className="now-tiles">
-            <NowTile
-              kicker="PM2.5 · now"
-              value={status?.pm.v}
-              unit="µg/m³"
-              band={status?.pm.band}
-              change={status?.pm.change}
-              sub={status ? subFor(status.pm, focusName) : 'Loading…'}
-              selected={state.metric === 'pm25_1h'}
-              onSelect={() => setState((s) => ({ ...s, metric: 'pm25_1h' }))}
-            />
-            <NowTile
-              kicker="PSI · 24 hours"
-              value={status?.psi?.v}
-              band={status?.psi?.band}
-              change={status?.psi?.change}
-              sub={status?.psi ? subFor(status.psi, focusName) : status ? 'No reading' : 'Loading…'}
-              selected={state.metric === 'psi_24h'}
-              onSelect={() => setState((s) => ({ ...s, metric: 'psi_24h' }))}
-            />
-            <PeriodTile
-              kicker={`Peak · ${periodLabel}`}
-              value={stats?.peak?.value}
-              unit={metric.unit}
-              band={stats?.peak ? metric.bands.find((x) => stats.peak!.value >= x.from && stats.peak!.value < x.to) : undefined}
-              lines={stats?.peak ? [(selectedDevices.length > 1 ? `${stats.peak.where} · ` : '') + stats.peak.when.replace(/^[A-Za-z]{3}, /, '')] : []}
-            />
-            <PeriodTile
-              kicker={`Average · ${periodLabel}`}
-              value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined}
-              unit={metric.unit}
-              lines={
-                stats
-                  ? [
-                      `Above ${metric.alertFrom}: ${stats.above} of ${stats.slots} ${daily ? 'days' : 'h'}`,
-                      ...(selectedDevices.length > 1 ? [`${selectedDevices.length} regions together`] : []),
-                    ]
-                  : []
-              }
-            />
-          </div>
-        </section>
-
-        <section className="card chart-card" aria-busy={loading} aria-label="Chart">
-          <div className="chart-top">
-            <h2>{state.metric === 'psi_24h' ? 'PSI, 24-hour' : 'PM2.5, hourly'}</h2>
-            <div className="segmented range" role="radiogroup" aria-label="Time range">
-              {RANGE_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  role="radio"
-                  aria-checked={state.range.preset === p.id}
-                  aria-label={p.label}
-                  className={state.range.preset === p.id ? 'on' : ''}
-                  onClick={() => setState((s) => ({ ...s, range: { preset: p.id } }))}
-                >
-                  {p.id}
-                </button>
-              ))}
-              <button
-                role="radio"
-                aria-checked={!!custom}
-                aria-label="Choose dates"
-                className={custom ? 'on' : ''}
-                onClick={() =>
-                  setState((s) => ({
-                    ...s,
-                    range: { preset: 'custom', from: sgDay(Date.now() - 6 * 86400_000), to: today },
-                  }))
-                }
-              >
-                Dates
+      <section className="glance card" aria-label="Air quality at a glance">
+        <div className="switcher" role="radiogroup" aria-label="Region">
+          {DEVICES.map((d) => {
+            const v = status?.regions[state.metric]?.[d.id];
+            const b = v != null ? bandOf(metric.bands, v) : undefined;
+            const on = state.focus === d.id;
+            return (
+              <button key={d.id} role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => setFocus(d.id)}>
+                <span className="sw-name">{d.name}</span>
+                <span className="sw-value">
+                  <i className="dot" style={{ background: b?.accent ?? 'transparent' }} aria-hidden />
+                  {v != null ? fmtValue(v) : '–'}
+                </span>
               </button>
-            </div>
-          </div>
+            );
+          })}
+        </div>
 
-          {custom && (
-            <div className="dates">
-              <label>
-                From
-                <input
-                  type="date"
-                  value={custom.from}
-                  max={custom.to}
-                  onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, from: e.target.value } }))}
-                />
-              </label>
-              <label>
-                To
-                <input
-                  type="date"
-                  value={custom.to}
-                  min={custom.from}
-                  max={today}
-                  onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, to: e.target.value } }))}
-                />
-              </label>
-            </div>
-          )}
+        <div className="tiles4">
+          <NowTile
+            kicker="PM2.5 now"
+            value={status?.pm.v}
+            unit="µg/m³"
+            band={status?.pm.band}
+            change={status?.pm.change}
+            sub={status ? highestNote(status.pm, focusName) : 'Loading…'}
+            selected={state.metric === 'pm25_1h'}
+            onSelect={() => setState((s) => ({ ...s, metric: 'pm25_1h' }))}
+          />
+          <NowTile
+            kicker="PSI 24 h"
+            value={status?.psi?.v}
+            band={status?.psi?.band}
+            change={status?.psi?.change}
+            sub={status?.psi ? highestNote(status.psi, focusName) : status ? 'No reading' : 'Loading…'}
+            selected={state.metric === 'psi_24h'}
+            onSelect={() => setState((s) => ({ ...s, metric: 'psi_24h' }))}
+          />
+          <PeriodTile
+            kicker={`Peak · ${periodLabel}`}
+            value={stats?.peak?.value}
+            unit={metric.unit}
+            band={stats?.peak ? bandOf(metric.bands, stats.peak.value) : undefined}
+            lines={stats?.peak ? [stats.peak.when.replace(/^[A-Za-z]{3}, /, '')] : []}
+          />
+          <PeriodTile
+            kicker={`Average · ${periodLabel}`}
+            value={stats?.mean != null ? Math.round(stats.mean * 10) / 10 : undefined}
+            unit={metric.unit}
+            band={stats?.mean != null ? bandOf(metric.bands, stats.mean) : undefined}
+            lines={stats ? [`${stats.above}/${stats.slots}\u00a0${daily ? "days" : "h"} >\u00a0${metric.alertFrom}`] : []}
+          />
+        </div>
 
-          <div className="regions" role="group" aria-label="Regions (tap to show or hide)">
-            {DEVICES.map((d) => {
-              const on = state.devices.includes(d.id);
-              const v = status?.regions[state.metric]?.[d.id];
-              return (
-                <button key={d.id} className={`region ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => toggleDevice(d.id)}>
-                  <span className="swatch" style={{ background: dark ? d.color.dark : d.color.light }} aria-hidden />
-                  <span className="region-name">{d.name}</span>
-                  <span className="region-value">{v != null ? fmtValue(v) : '–'}</span>
-                </button>
-              );
-            })}
-            {state.sensor && state.metric === 'pm25_1h' && (
-              <span className="region on" title="Your own sensor, uncalibrated. Only visible with this link.">
-                <span className="swatch dashed" style={{ borderColor: dark ? MY_SENSOR_COLOR.dark : MY_SENSOR_COLOR.light }} aria-hidden />
-                <span className="region-name">My sensor</span>
-                <span className="region-value">raw</span>
-              </span>
-            )}
-          </div>
-
+        <div className="chart-area" aria-busy={loading}>
           {error ? (
             <div className="empty">{error}</div>
           ) : data && !data.points.length && !loading ? (
@@ -667,56 +614,72 @@ export default function Dashboard() {
             />
           )}
           {loading && <div className="loading" aria-hidden />}
-          {zoom && (
-            <button className="ghost reset-zoom" onClick={() => setZoom(null)}>
-              Show whole period
+        </div>
+
+        <div className="chart-bar">
+          <div className="segmented range" role="radiogroup" aria-label="Time range">
+            {RANGE_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                role="radio"
+                aria-checked={state.range.preset === p.id}
+                aria-label={p.label}
+                className={state.range.preset === p.id ? 'on' : ''}
+                onClick={() => setState((s) => ({ ...s, range: { preset: p.id } }))}
+              >
+                {p.id}
+              </button>
+            ))}
+            <button
+              role="radio"
+              aria-checked={!!custom}
+              aria-label="Choose dates"
+              className={custom ? 'on' : ''}
+              onClick={() => setState((s) => ({ ...s, range: { preset: 'custom', from: sgDay(Date.now() - 6 * 86400_000), to: today } }))}
+            >
+              📅
             </button>
-          )}
-
-          {!data?.demo && (
-            <div className="panel-bar">
-              <span className="panel-bar-label">Weather:</span>
-              <div className="chips" role="group" aria-label="Weather panels">
-                {PANEL_ORDER.map((id) => {
-                  const view = WEATHER_VIEWS.find((w) => w.id === id)!;
-                  const on = state.panels.includes(id);
-                  return (
-                    <button key={id} className={`chip small ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => togglePanel(id)}>
-                      {on ? '✓ ' : '+ '}
-                      {view.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {state.panels.length > 0 && (
-                <label className="select">
-                  Station
-                  <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
-                    {WEATHER_STATIONS.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name} ({w.region})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-          )}
-
-          <div className="chart-notes">
-            <p>Tap or hover for values · drag the slider to zoom · tap a region to show or hide it</p>
-            {daily && <p>Long period: values are daily averages.</p>}
-            {weatherError && <p>Weather: {weatherError}</p>}
-            {state.panels.length > 0 && !data?.demo && (
-              <p>
-                Weather from NEA station {weatherStation.name}.{state.panels.includes('wind') && !daily ? ' Arrows show where the wind blows to (up = north).' : ''} A gap
-                means the station sent no data.
-              </p>
-            )}
           </div>
-        </section>
-      </div>
+          <button className={`toggle ${state.compare ? 'on' : ''}`} aria-pressed={state.compare} onClick={() => setCompare(!state.compare)}>
+            Compare
+          </button>
+        </div>
 
+        {custom && (
+          <div className="dates">
+            <label>
+              From
+              <input
+                type="date"
+                value={custom.from}
+                max={custom.to}
+                onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, from: e.target.value } }))}
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={custom.to}
+                min={custom.from}
+                max={today}
+                onChange={(e) => e.target.value && setState((s) => ({ ...s, range: { ...custom, to: e.target.value } }))}
+              />
+            </label>
+          </div>
+        )}
+
+        {(zoom || state.compare) && (
+          <p className="chart-hint">
+            {zoom && (
+              <button className="link" onClick={() => setZoom(null)}>
+                Show whole period
+              </button>
+            )}
+            {state.compare && <span>Grey lines: the other four regions.</span>}
+          </p>
+        )}
+      </section>
 
       {state.sensor && (
         <section className="card chart-card" aria-label="My sensor calibration">
@@ -760,8 +723,46 @@ export default function Dashboard() {
         </section>
       )}
 
-      <section className="actions">
-        <p className="actions-note">The download contains the regions and weather panels shown above, for the time window you see.</p>
+      <details className="more card">
+        <summary>More: weather, download, explanations</summary>
+        {!data?.demo && (
+          <div className="more-block">
+            <h3>Weather in the chart</h3>
+            <div className="chips" role="group" aria-label="Weather panels">
+              {PANEL_ORDER.map((id) => {
+                const view = WEATHER_VIEWS.find((w) => w.id === id)!;
+                const on = state.panels.includes(id);
+                return (
+                  <button key={id} className={`chip small ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => togglePanel(id)}>
+                    {on ? '✓ ' : '+ '}
+                    {view.label}
+                  </button>
+                );
+              })}
+            </div>
+            {state.panels.length > 0 && (
+              <label className="select">
+                Station
+                <select value={state.station} onChange={(e) => setState((s) => ({ ...s, station: e.target.value }))}>
+                  {WEATHER_STATIONS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.region})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {weatherError && <p className="muted">Weather: {weatherError}</p>}
+            {state.panels.length > 0 && (
+              <p className="muted">
+                From NEA station {weatherStation.name}.{state.panels.includes('wind') && !daily ? ' Arrows show where the wind blows to (up = north).' : ''}
+              </p>
+            )}
+          </div>
+        )}
+        <div className="more-block actions">
+        <h3>Download</h3>
+        <p className="actions-note">Contains what the chart shows: region (or all five when comparing), weather, time window.</p>
         <button className="primary" onClick={downloadExcel} disabled={!table.length}>
           Download for Excel
         </button>
@@ -769,10 +770,10 @@ export default function Dashboard() {
           CSV
         </button>
         <button onClick={copyLink}>{copied ? 'Link copied' : 'Copy link to this view'}</button>
-      </section>
+        </div>
 
-      <section className="card about">
-        <h2>About this page</h2>
+        <div className="more-block about">
+        <h3>About the values</h3>
           {status?.psi && (
           <p className="advice">
             <b>NEA advice:</b> {PSI_ADVICE[status.psi.band.label]}{' '}
@@ -791,9 +792,9 @@ export default function Dashboard() {
           ))}
         </ul>
         <p className="muted">Each region value comes from NEA's monitoring in that part of Singapore, so conditions in your street can differ.</p>
-      </section>
+        </div>
 
-      <details className="card table-card">
+        <details className="table-card">
         <summary>Show the data as a table</summary>
         <div className="table-wrap">
           <table>
@@ -818,6 +819,7 @@ export default function Dashboard() {
           </table>
           {table.length > 240 && <p className="muted">Showing the latest 240 rows. Download the CSV for everything.</p>}
         </div>
+        </details>
       </details>
 
       <footer className="footer">
@@ -914,9 +916,14 @@ function PeriodTile({
   );
 }
 
-/** "Central" or "Central · highest: East 160" when another region is higher. */
-function subFor(x: { where: string; highest: { v: number; where: string } }, focus: string) {
-  return x.where === x.highest.where ? `${x.where} (highest region)` : `${focus} · highest: ${x.highest.where} ${fmtValue(x.highest.v)}`;
+
+function bandOf<T extends { from: number; to: number }>(bands: T[], v: number): T | undefined {
+  return bands.find((b) => v >= b.from && v < b.to) ?? (v >= bands[bands.length - 1].from ? bands[bands.length - 1] : undefined);
+}
+
+/** Small note when another region is higher than the one shown. */
+function highestNote(x: { where: string; highest: { v: number; where: string } }, focus: string) {
+  return x.highest.where === focus || x.where === x.highest.where ? 'Highest of the 5 regions' : `Highest: ${x.highest.where} ${fmtValue(x.highest.v)}`;
 }
 
 function Tile({

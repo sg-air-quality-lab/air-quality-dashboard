@@ -17,6 +17,10 @@ export interface ChartSeries {
   data: [number, number | null][];
   /** Dashed line, used for uncalibrated citizen sensors. */
   dashed?: boolean;
+  /** Colour the line by air-quality band (green, yellow, orange, red). */
+  bandColored?: boolean;
+  /** Thin background line, e.g. other regions in comparison mode. */
+  muted?: boolean;
 }
 
 export interface Panel {
@@ -50,7 +54,7 @@ const INK = {
 // Layout in pixels (top to bottom).
 const TOP = 30;
 const MAIN_H = 300;
-const MAIN_H_NARROW = 220; // phones: keep the main chart on the first screen
+const MAIN_H_NARROW = 190; // phones: keep the main chart on the first screen
 const GAP = 30; // room for the next panel's name
 const PANEL_H = 96;
 const BOTTOM = 72; // time labels + slider
@@ -336,6 +340,17 @@ export default function Meteogram(props: Props) {
           labelFormatter: (v: number) => (Number.isFinite(v) ? fmtDateTime(v, daily) : ''),
         },
       ],
+      // The main line takes the colour of the band it is in, the same colours as the boxes above.
+      visualMap: series
+        .map((s, i) => (s.bandColored ? i : -1))
+        .filter((i) => i >= 0)
+        .map((i) => ({
+          type: 'piecewise' as const,
+          show: false,
+          seriesIndex: i,
+          dimension: 1,
+          pieces: metric.bands.map((b) => ({ gte: b.from, lt: b.to === 500 ? 100000 : b.to, color: b.accent })),
+        })),
       series: [
         ...series.map((s, i) => ({
           id: s.id,
@@ -347,8 +362,15 @@ export default function Meteogram(props: Props) {
           showSymbol: false,
           symbolSize: 8,
           connectNulls: false,
-          lineStyle: { width: 2, color: s.color, type: s.dashed ? ('dashed' as const) : ('solid' as const) },
-          itemStyle: { color: s.color },
+          // A band-coloured line gets its colour from visualMap; an explicit colour would override it.
+          lineStyle: {
+            width: s.muted ? 1.2 : 2.6,
+            ...(s.bandColored ? {} : { color: s.color }),
+            opacity: s.muted ? 0.8 : 1,
+            type: s.dashed ? ('dashed' as const) : ('solid' as const),
+          },
+          itemStyle: s.bandColored ? {} : { color: s.color },
+          z: s.muted ? 2 : 3,
           markArea: i === 0 ? { silent: true, data: bandAreas as never } : undefined,
         })),
         ...panelSeries,
