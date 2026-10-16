@@ -11,6 +11,10 @@ on:
       to:
         description: 'Backfill end date (YYYY-MM-DD), leave empty for today'
         required: false
+      air_only:
+        description: 'Only PM2.5 and PSI, no weather (much faster for a long backfill, e.g. a whole year)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +40,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           FROM: ${{ github.event.inputs.from }}
           TO: ${{ github.event.inputs.to }}
+          AIR_ONLY: ${{ github.event.inputs.air_only }}
         run: |
           if [ -n "$FROM" ] && [ -n "$TO" ]; then
             node collector/collect-nea.mjs "$FROM" "$TO"

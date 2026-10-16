@@ -3,6 +3,7 @@
 //
 //   node collector/collect-nea.mjs                         -> yesterday and today (hourly job)
 //   node collector/collect-nea.mjs 2026-09-01 2026-10-09   -> backfill a date range
+//   AIR_ONLY=true node collector/collect-nea.mjs 2025-10-01 2026-09-30   -> only PM2.5 and PSI (fast)
 //
 // Needs SUPABASE_URL and SUPABASE_SECRET_KEY (server-side key, never in the browser).
 
@@ -46,10 +47,11 @@ async function upsert(rows) {
   }
 }
 
+const airOnly = process.env.AIR_ONLY === 'true';
 let stored = 0;
 let failures = 0;
 const dates = dateRange(from, to);
-console.log(`Collecting ${Object.keys(NEA_METRICS).join(', ')} and weather for ${from} .. ${to} (${dates.length} days)`);
+console.log(`Collecting ${Object.keys(NEA_METRICS).join(', ')}${airOnly ? '' : ' and weather'} for ${from} .. ${to} (${dates.length} days)`);
 
 for (const date of dates) {
   for (const metricId of Object.keys(NEA_METRICS)) {
@@ -64,6 +66,7 @@ for (const date of dates) {
     }
     await new Promise((r) => setTimeout(r, 300)); // be gentle with the public API
   }
+  if (airOnly) continue;
   try {
     const rows = dedupe(await fetchWeatherDay(date));
     if (rows.length) await upsert(rows);

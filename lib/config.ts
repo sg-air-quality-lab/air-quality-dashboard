@@ -153,6 +153,7 @@ export const RANGE_PRESETS = [
   { id: '7d', label: '7 days', hours: 168 },
   { id: '30d', label: '30 days', hours: 720 },
   { id: '90d', label: '90 days', hours: 2160 },
+  { id: '1y', label: '1 year', hours: 8760 },
 ] as const;
 
 export type RangePresetId = (typeof RANGE_PRESETS)[number]['id'];
