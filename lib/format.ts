@@ -48,3 +48,10 @@ export function sgDay(t: number | Date) {
 export function fmtValue(v: number) {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
+
+const timeOnly = new Intl.DateTimeFormat('en-SG', { timeZone: TIME_ZONE, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+
+/** "Fri 06:00" in Singapore time. */
+export function fmtTime(t: number | string | Date) {
+  return timeOnly.format(new Date(t)).replace(',', '');
+}

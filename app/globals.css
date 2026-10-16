@@ -175,12 +175,16 @@ summary:focus-visible {
   align-items: center;
   gap: 7px;
   border: 0;
-  background: var(--surface);
-  box-shadow: 0 0 0 1px var(--ring);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ring);
   border-radius: 999px;
-  padding: 5px 12px 5px 10px;
+  padding: 6px 13px 6px 11px;
   font-size: 14px;
-  color: var(--muted);
+  color: var(--ink-2);
+}
+
+.chip:hover {
+  background: var(--accent-soft);
 }
 
 .chip .swatch {
@@ -192,7 +196,9 @@ summary:focus-visible {
 
 .chip.on {
   color: var(--ink);
-  font-weight: 550;
+  font-weight: 600;
+  background: var(--page);
+  box-shadow: inset 0 0 0 1.5px var(--ink-2);
 }
 
 .chip.on .swatch {
@@ -248,9 +254,7 @@ summary:focus-visible {
 .tile-sub {
   font-size: 12px;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.6;
 }
 
 .tag {
@@ -350,6 +354,25 @@ summary:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.actions button.primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.actions button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.actions-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .actions button:disabled {
@@ -487,19 +510,533 @@ th {
   opacity: 1;
 }
 
-.freshness {
-  margin: -4px 0 0;
+.ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- right now */
+
+.status {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--ring);
+  border-left: 5px solid var(--accent-band, var(--ring));
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.status p {
+  margin: 0;
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+
+@media (max-width: 560px) {
+  .status-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.status-kicker {
   font-size: 13px;
   color: var(--ink-2);
 }
 
-.window-label {
-  margin: -6px 0 0;
+.status-value {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 34px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.status-value b {
+  font-weight: 650;
+}
+
+.status-value .unit {
+  font-size: 14px;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.badge {
+  align-self: center;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.status-sub,
+.status-foot {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.status-advice {
+  font-size: 14px;
+  color: var(--ink-2);
+  max-width: 80ch;
+}
+
+/* ---------- chart card */
+
+.chart-head .chips {
+  flex: 1;
+}
+
+.panel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hair);
+}
+
+.panel-bar-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chip.small {
+  font-size: 13px;
+  padding: 4px 11px;
+}
+
+.meteogram {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.chart-notes {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.chart-notes p {
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
 }
 
-.ghost:disabled {
+/* ---------- summary */
+
+.summary-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 4px 0 8px;
+}
+
+.summary-title span {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 13px;
+  margin-left: 6px;
+}
+
+.summary .tiles-3 {
+  margin-top: 0;
+}
+
+/* ---------- at a glance: current values and chart on the first screen */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.topbar h1 {
+  font-size: clamp(22px, 3.4vw, 34px);
+  line-height: 1.15;
+  margin: 2px 0 0;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.updated {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.glance {
+  display: grid;
+  gap: 12px;
+}
+
+.now {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.now-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.now-tile {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 4px;
+  text-align: left;
+  border: 0;
+  border-left: 5px solid var(--band);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--ring);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.now-tile.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.now-kicker {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.now-value {
+  font-size: 36px;
+  line-height: 1.05;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.now-unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.now-tile .badge {
+  font-size: 12px;
+  padding: 1px 9px;
+  align-self: auto;
+}
+
+.now-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.advice {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.chart-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.chart-top h2 {
+  font-size: 16px;
+}
+
+.segmented.range {
+  flex-wrap: nowrap;
+}
+
+.segmented.range button {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.regions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.region {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ring);
+  border-radius: 10px;
+  padding: 7px 9px 6px;
+  text-align: left;
+  min-width: 0;
   opacity: 0.45;
+}
+
+.region.on {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1.5px var(--ink-2);
+}
+
+.region .swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.region .swatch.dashed {
+  background: transparent;
+  border-top: 2px dashed;
+  height: 0;
+  border-radius: 0;
+}
+
+.region-name {
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.region-value {
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.reset-zoom {
+  display: block;
+  margin: 4px auto 0;
+}
+
+.summary .tiles-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Phones */
+@media (max-width: 560px) {
+  .page {
+    padding: 14px 12px 40px;
+    gap: 12px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+  }
+
+  .now-tile {
+    padding: 10px 12px;
+  }
+
+  .now-value {
+    font-size: 32px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  /* The y-axis already says what is shown; the time range gets the full width. */
+  .chart-top h2 {
+    display: none;
+  }
+
+  .segmented.range {
+    display: flex;
+    width: 100%;
+  }
+
+  .segmented.range button {
+    flex: 1;
+    padding: 6px 0;
+  }
+
+  .summary .tile {
+    padding: 10px;
+  }
+
+  .summary .tile-value {
+    font-size: 22px;
+  }
+
+  .summary .tile-unit {
+    display: block;
+    font-size: 12px;
+  }
+}
+
+/* Computers and large tablets in landscape: values on the left, chart on the right */
+@media (min-width: 1024px) {
+  .glance {
+    grid-template-columns: 300px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .now {
+    position: sticky;
+    top: 16px;
+  }
+
+  .now-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .now-value {
+    font-size: 44px;
+  }
+}
+
+/* Phones: tighter so values and the chart share the first screen */
+@media (max-width: 560px) {
+  .topbar .eyebrow {
+    display: none;
+  }
+
+  .topbar h1 {
+    font-size: 21px;
+  }
+
+  .updated {
+    font-size: 12px;
+  }
+
+  .now-tiles {
+    gap: 8px;
+  }
+
+  .now-tile {
+    padding: 8px 10px 9px;
+    gap: 2px;
+    border-left-width: 4px;
+  }
+
+  .now-kicker {
+    font-size: 12px;
+  }
+
+  .now-value {
+    font-size: 30px;
+  }
+
+  .now-unit {
+    font-size: 12px;
+  }
+
+  .now-tile .badge {
+    font-size: 11px;
+    padding: 0 8px;
+  }
+
+  .now-sub {
+    font-size: 11px;
+  }
+
+  .advice {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .regions {
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .region {
+    padding: 5px 7px 4px;
+  }
+
+  .region .swatch {
+    width: 14px;
+    height: 3px;
+  }
+
+  .region-name {
+    font-size: 11px;
+  }
+
+  .region-value {
+    font-size: 15px;
+  }
+
+  .segmented.range button {
+    padding: 4px 0;
+  }
+
+  .meteogram {
+    margin-top: 2px;
+  }
+}
+
+/* ---------- four boxes: now (PM2.5, PSI) and the chosen period (peak, average) */
+
+.now-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.now-tile.period {
   cursor: default;
+}
+
+
+@media (min-width: 900px) {
+  .now-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Computers: boxes in one row above the chart instead of a side column */
+@media (min-width: 1024px) {
+  .glance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .now {
+    position: static;
+  }
+
+  .now-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .now-value {
+    font-size: 38px;
+  }
+}
+
+@media (max-width: 560px) {
+  .now-tile.period .now-value {
+    font-size: 24px;
+  }
+
+  .now-tile.period .now-kicker {
+    font-size: 11.5px;
+  }
 }
