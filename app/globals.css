@@ -1345,3 +1345,10 @@ th {
     font-size: 20px;
   }
 }
+
+.sw-line {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  margin: 1px 0 2px;
+}

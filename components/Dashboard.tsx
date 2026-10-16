@@ -314,13 +314,15 @@ export default function Dashboard() {
     if (!data) return [];
     // Focus region last, so its line is drawn on top.
     const ordered = [...DEVICES.filter((d) => state.devices.includes(d.id) && d.id !== state.focus), ...DEVICES.filter((d) => d.id === state.focus)];
+    // One region: the line takes the air-quality colours. Comparing: each region has its own colour
+    // (never green, yellow, orange or red), and the selected region is drawn thicker.
     const series: ChartSeries[] = ordered.map((d) => ({
       id: d.id,
       name: d.name,
-      color: d.id === state.focus ? (dark ? '#f2f1ec' : '#1f1f1d') : dark ? '#6b6a65' : '#b4b2aa',
+      color: dark ? d.color.dark : d.color.light,
       data: withGaps(data.points, d.id, step),
-      bandColored: d.id === state.focus,
-      muted: d.id !== state.focus,
+      bandColored: !state.compare,
+      muted: state.compare && d.id !== state.focus,
     }));
     if (state.sensor && data.points.some((p) => p.device === state.sensor)) {
       series.push({
@@ -332,7 +334,7 @@ export default function Dashboard() {
       });
     }
     return series;
-  }, [data, state.devices, state.focus, state.sensor, dark, step]);
+  }, [data, state.devices, state.focus, state.compare, state.sensor, dark, step]);
 
   // Only the official NEA values count for the summary, table and CSV.
   const neaPoints = useMemo(() => (data?.points ?? []).filter((p) => p.device.startsWith('nea-')), [data]);
@@ -549,6 +551,7 @@ export default function Dashboard() {
             return (
               <button key={d.id} role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => setFocus(d.id)}>
                 <span className="sw-name">{d.name}</span>
+                {state.compare && <span className="sw-line" style={{ background: dark ? d.color.dark : d.color.light }} aria-hidden />}
                 <span className="sw-value">
                   <i className="dot" style={{ background: b?.accent ?? 'transparent' }} aria-hidden />
                   {v != null ? fmtValue(v) : '–'}
@@ -676,7 +679,7 @@ export default function Dashboard() {
                 Show whole period
               </button>
             )}
-            {state.compare && <span>Grey lines: the other four regions.</span>}
+            {state.compare && <span>Each region has its own colour (see the names above); the selected one is drawn thicker.</span>}
           </p>
         )}
       </section>

@@ -364,9 +364,9 @@ export default function Meteogram(props: Props) {
           connectNulls: false,
           // A band-coloured line gets its colour from visualMap; an explicit colour would override it.
           lineStyle: {
-            width: s.muted ? 1.2 : 2.6,
+            width: s.muted ? 1.6 : 2.8,
             ...(s.bandColored ? {} : { color: s.color }),
-            opacity: s.muted ? 0.8 : 1,
+            opacity: s.muted ? 0.85 : 1,
             type: s.dashed ? ('dashed' as const) : ('solid' as const),
           },
           itemStyle: s.bandColored ? {} : { color: s.color },
